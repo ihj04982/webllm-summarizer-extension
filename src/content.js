@@ -1,4 +1,5 @@
 import { ExtensionServiceWorkerMLCEngineHandler } from "@mlc-ai/web-llm";
+import { Readability } from "@mozilla/readability";
 
 // Hookup an engine to a service worker handler
 let handler;
@@ -15,38 +16,20 @@ chrome.runtime.onConnect.addListener(function (port) {
 
 // Readability를 CDN에서 동적으로 import
 function extractMainContent() {
-  return new Promise((resolve) => {
-    const script = document.createElement("script");
-    script.src = "https://unpkg.com/@mozilla/readability@0.4.4/Readability.js";
-    script.onload = () => {
-      try {
-        const article = new window.Readability(document.cloneNode(true)).parse();
-        resolve(article?.textContent || "");
-      } catch (e) {
-        resolve("");
-      }
-    };
-    document.head.appendChild(script);
-  });
+  try {
+    const article = new Readability(document.cloneNode(true)).parse();
+    return Promise.resolve(article?.textContent || "");
+  } catch (e) {
+    return Promise.resolve("");
+  }
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === "EXTRACT_MAIN_CONTENT") {
-    (async () => {
-      let content = "";
-      if (window.Readability) {
-        try {
-          const article = new window.Readability(document.cloneNode(true)).parse();
-          content = article?.textContent || "";
-        } catch (e) {
-          content = "";
-        }
-        sendResponse({ content });
-      } else {
-        content = await extractMainContent();
-        sendResponse({ content });
-      }
-    })();
-    return true; // async 응답
+    const article = new Readability(document.cloneNode(true)).parse();
+    sendResponse({
+      content: article?.textContent || "",
+      title: article?.title || document.title || "Untitled",
+    });
   }
 });

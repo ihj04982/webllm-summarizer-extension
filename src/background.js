@@ -12,3 +12,8 @@ chrome.runtime.onConnect.addListener(function (port) {
   }
   port.onMessage.addListener(handler.onmessage.bind(handler));
 });
+
+// Open sidepanel when extension icon is clicked
+chrome.action.onClicked.addListener((tab) => {
+  chrome.sidePanel.open({ windowId: tab.windowId });
+});
