@@ -3,32 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <title>웹 페이지 요약기</title>
-    <link rel="stylesheet" href="sidepanel.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   </head>
   <body>
-    <div id="loadingContainer"></div>
-
-    <div class="input-container form-group">
-      <input type="search" id="query-input" placeholder="요약할 내용을 입력하거나 버튼을 누르세요" />
-      <button id="submit-button" class="btn">
-        <i class="fa fa-comments"></i>
-      </button>
-      <button id="extract-button" class="btn"><i class="fa fa-file-lines"></i> 본문 추출</button>
+    <div id="loadingContainerWrapper">
+      <div id="loadingText">모델 준비 중입니다...</div>
+      <div id="loadingContainer"></div>
     </div>
 
-    <div class="stage">
-      <div id="loading-indicator" class="dot-flashing"></div>
+    <div id="inputContainer">
+      <button id="extract-button"><i class="fa fa-file-lines"></i> 본문 추출 및 요약</button>
     </div>
 
-    <div id="answerWrapper">
-      <div id="answer"></div>
-      <div class="copyRow">
-        <span id="timestamp"></span>
-        <button id="copyAnswer" class="btn copyButton" title="Copy the Answer to the Clipboard">
-          <i class="fa-solid fa-copy fa-lg"></i>
-        </button>
-      </div>
+    <div id="stage">
+      <div id="loading-indicator"></div>
+    </div>
+
+    <div id="historyWrapper">
+      <!-- 요약 히스토리 카드들이 여기에 추가됨 -->
     </div>
 
     <script type="module" src="./sidepanel.ts"></script>

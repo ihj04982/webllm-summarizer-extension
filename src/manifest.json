@@ -1,14 +1,24 @@
 {
   "manifest_version": 3,
-  "name": "웹 페이지 요약기",
+  "name": "WebLLM Summarizer",
   "version": "1.0",
-  "permissions": ["sidePanel", "activeTab", "storage"],
-  "side_panel": {
-    "default_path": "sidepanel.html"
-  },
+  "description": "WebLLM을 사용한 웹 페이지 요약 확장 프로그램",
+  "permissions": ["activeTab", "storage", "unlimitedStorage", "sidePanel"],
+  "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js",
     "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "action": {
+    "default_title": "웹 페이지 요약기",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
   "content_scripts": [
     {
