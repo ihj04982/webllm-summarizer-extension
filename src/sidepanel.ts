@@ -1,4 +1,4 @@
-import { CreateExtensionServiceWorkerMLCEngine, MLCEngineInterface, InitProgressReport } from "@mlc-ai/web-llm";
+import { CreateWebWorkerMLCEngine, MLCEngineInterface, InitProgressReport } from "@mlc-ai/web-llm";
 import * as ProgressBar from "progressbar.js";
 import "./styles";
 
@@ -26,9 +26,14 @@ const initProgressCallback = (report: InitProgressReport) => {
   }
 };
 
-const engine: MLCEngineInterface = await CreateExtensionServiceWorkerMLCEngine("Qwen2-0.5B-Instruct-q4f16_1-MLC", {
-  initProgressCallback: initProgressCallback,
-});
+// 웹워커 엔진 초기화
+const engine: MLCEngineInterface = await CreateWebWorkerMLCEngine(
+  new Worker(new URL("./worker.ts", import.meta.url), { type: "module" }),
+  "Qwen2-0.5B-Instruct-q4f16_1-MLC",
+  {
+    initProgressCallback: initProgressCallback,
+  }
+);
 let summaryHistory: { content: string; summary: string; timestamp: string; title: string }[] = [];
 
 function enableInputs() {
@@ -170,31 +175,33 @@ extractButton.addEventListener("click", () => {
               stream: true,
               messages: [{ role: "user", content: `다음 본문을 한국어로 간결하게 요약해줘.\n\n${content}` }],
             });
+
             // 마지막 카드의 summary DOM을 직접 참조
             const lastCard = historyWrapper.querySelector(".history-card");
             const summaryDiv = lastCard?.querySelector(".summary-text");
+
             for await (const chunk of completion) {
               const curDelta = chunk.choices[0].delta.content;
-              console.log("chunk delta:", curDelta);
               if (curDelta) {
                 summary += curDelta;
                 summaryHistory[summaryHistory.length - 1].summary = summary;
                 if (summaryDiv) {
                   summaryDiv.innerHTML += curDelta.replace(/\n/g, "<br>");
-                  console.log("summaryDiv.innerHTML:", summaryDiv.innerHTML);
                 }
-                console.log("summary:", summary);
               }
             }
+
             // 스트리밍이 끝난 후 전체 답변을 getMessage로 보정
             const fullReply = await engine.getMessage();
             summary = fullReply;
             summaryHistory[summaryHistory.length - 1].summary = summary || "요약 실패";
             if (summaryDiv) summaryDiv.innerHTML = (summary || "요약 실패").replace(/\n/g, "<br>");
+          } catch (error) {
+            console.error("Error during summarization:", error);
+            summaryHistory[summaryHistory.length - 1].summary = "요약 중 오류가 발생했습니다.";
           } finally {
             document.getElementById("loading-indicator")!.style.display = "none";
             setExtractButtonState(false);
-            // 최종 요약 결과로 카드 업데이트 및 전체 렌더링
             renderHistory();
           }
         } else {
