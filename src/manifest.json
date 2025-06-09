@@ -3,10 +3,10 @@
   "name": "WebLLM Summarizer",
   "version": "1.0",
   "description": "WebLLM을 사용한 웹 페이지 요약 확장 프로그램",
-  "permissions": ["activeTab", "storage", "unlimitedStorage", "sidePanel"],
+  "permissions": ["activeTab", "storage", "unlimitedStorage", "sidePanel", "background"],
   "host_permissions": ["<all_urls>"],
   "background": {
-    "service_worker": "background.js",
+    "service_worker": "background.ts",
     "type": "module"
   },
   "side_panel": {
@@ -23,7 +23,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content.js"]
+      "js": ["content.ts"]
     }
   ],
   "icons": {

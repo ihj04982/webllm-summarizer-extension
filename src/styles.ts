@@ -194,15 +194,20 @@ addStyles(`
     color: #666666;
   }
 
-  .copy-button {
+  .copy-button, .delete-button {
     background: none;
     border: none;
     cursor: pointer;
     color: #666666;
     padding: 4px;
+    margin-left: 8px;
   }
 
   .copy-button:hover {
     color: #333;
+  }
+
+  .delete-button:hover {
+    color: #e74c3c;
   }
 `);

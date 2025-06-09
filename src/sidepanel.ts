@@ -1,4 +1,3 @@
-import { CreateWebWorkerMLCEngine, MLCEngineInterface, InitProgressReport } from "@mlc-ai/web-llm";
 import * as ProgressBar from "progressbar.js";
 import "./styles";
 
@@ -6,10 +5,17 @@ const extractButton = document.getElementById("extract-button")!;
 const historyWrapper = document.getElementById("historyWrapper")!;
 const loadingContainerWrapper = document.getElementById("loadingContainerWrapper")!;
 
-// 성능 최적화를 위한 상수
-const MAX_HISTORY_ITEMS = 20; // 최대 히스토리 개수 제한
-const MAX_CONTENT_LENGTH = 10000; // 콘텐츠 최대 길이 제한
+// 서비스워커와 통신하는 인터페이스
+interface SummaryItem {
+  content: string;
+  summary: string;
+  timestamp: string;
+  title: string;
+  url: string;
+  id: string;
+}
 
+// 로딩 바 설정
 const progressBar = new ProgressBar.Line("#loadingContainer", {
   strokeWidth: 4,
   easing: "easeInOut",
@@ -20,72 +26,218 @@ const progressBar = new ProgressBar.Line("#loadingContainer", {
   svgStyle: { width: "100%", height: "100%" },
 });
 
-const initProgressCallback = (report: InitProgressReport) => {
-  progressBar.animate(report.progress, { duration: 50 });
-  if (report.progress == 1.0) {
-    loadingContainerWrapper.style.display = "none";
-    const loadingBarContainer = document.getElementById("loadingContainer");
-    if (loadingBarContainer) {
-      loadingBarContainer.remove();
+// 웹워커 관리 (사이드패널에서)
+let mlcWorker: Worker | null = null;
+let isEngineReady = false;
+let currentRequestId = 0;
+
+// 웹워커 초기화
+function initializeMLCWorker() {
+  if (mlcWorker) {
+    mlcWorker.terminate();
+  }
+
+  mlcWorker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
+
+  mlcWorker.onmessage = (event) => {
+    const { type, data } = event.data;
+
+    switch (type) {
+      case "WORKER_READY":
+        console.log("MLC Worker ready");
+        // 웹워커 준비 완료 후 엔진 초기화 시작
+        setTimeout(() => {
+          sendToWorker("INIT_ENGINE");
+        }, 100);
+        break;
+
+      case "ENGINE_INIT_START":
+        console.log("Engine initialization started");
+        loadingContainerWrapper.style.display = "flex";
+        break;
+
+      case "ENGINE_INIT_PROGRESS":
+        progressBar.animate(data.progress, { duration: 50 });
+        console.log(`Engine loading: ${(data.progress * 100).toFixed(1)}%`);
+        break;
+
+      case "ENGINE_INIT_COMPLETE":
+        console.log("Engine initialization complete");
+        isEngineReady = true;
+        loadingContainerWrapper.style.display = "none";
+        const loadingBarContainer = document.getElementById("loadingContainer");
+        if (loadingBarContainer) {
+          loadingBarContainer.remove();
+        }
+        break;
+
+      case "ENGINE_INIT_ERROR":
+        console.error("Engine initialization failed:", data.error);
+        isEngineReady = false;
+        loadingContainerWrapper.style.display = "none";
+        alert(`엔진 초기화 실패: ${data.error}`);
+        break;
+
+      case "SUMMARY_START":
+        console.log(`Summary generation started for request ${data.requestId}`);
+        break;
+
+      case "SUMMARY_PROGRESS":
+        // 실시간 요약 업데이트
+        updateSummaryInPlace(data.itemId, data.partialSummary);
+        break;
+
+      case "SUMMARY_COMPLETE":
+        console.log(`Summary generation complete for request ${data.requestId}`);
+        finalizeSummary(data.itemId, data.summary);
+        break;
+
+      case "SUMMARY_ERROR":
+        console.error(`Summary generation failed for request ${data.requestId}:`, data.error);
+        handleSummaryError(data.itemId, data.error);
+        break;
+
+      case "WORKER_ERROR":
+        console.error("Worker error:", data.error);
+        break;
+
+      default:
+        console.log("Unknown worker message:", type);
+    }
+  };
+
+  mlcWorker.onerror = (error) => {
+    console.error("Worker error:", error);
+  };
+
+  return mlcWorker;
+}
+
+// 웹워커에 메시지 전송
+function sendToWorker(type: string, data?: any) {
+  if (!mlcWorker) {
+    console.error("Worker not initialized");
+    return;
+  }
+
+  mlcWorker.postMessage({ type, data });
+}
+
+// 서비스워커와 통신하는 헬퍼 함수들
+class ServiceWorkerAPI {
+  private static async sendMessage(message: any): Promise<any> {
+    return new Promise((resolve, reject) => {
+      try {
+        chrome.runtime.sendMessage(message, (response) => {
+          if (chrome.runtime.lastError) {
+            console.error("Chrome runtime error:", chrome.runtime.lastError);
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+
+          if (!response) {
+            console.warn("No response from service worker for:", message.type);
+            resolve({});
+            return;
+          }
+
+          resolve(response);
+        });
+      } catch (error) {
+        console.error("Error sending message to service worker:", error);
+        reject(error);
+      }
+    });
+  }
+
+  static async getHistory(limit?: number): Promise<SummaryItem[]> {
+    try {
+      const response = await this.sendMessage({ type: "GET_HISTORY", limit });
+      return response.history || [];
+    } catch (error) {
+      console.error("Failed to get history:", error);
+      return [];
     }
   }
-};
 
-// 웹워커 엔진 초기화
-const engine = await CreateWebWorkerMLCEngine(
-  new Worker(new URL("./worker.ts", import.meta.url), { type: "module" }),
-  "Qwen3-1.7B-q4f16_1-MLC",
-  {
-    initProgressCallback: initProgressCallback,
+  static async addSummaryItem(item: Omit<SummaryItem, "id">): Promise<SummaryItem> {
+    try {
+      const response = await this.sendMessage({ type: "ADD_SUMMARY_ITEM", item });
+      if (!response.item) {
+        throw new Error("Failed to add summary item - no item in response");
+      }
+      return response.item;
+    } catch (error) {
+      console.error("Failed to add summary item:", error);
+      return {
+        ...item,
+        id: "temp_" + Date.now().toString(),
+      };
+    }
   }
-);
 
-let summaryHistory: { content: string; summary: string; timestamp: string; title: string }[] = [];
+  static async updateSummary(id: string, summary: string): Promise<void> {
+    try {
+      await this.sendMessage({ type: "UPDATE_SUMMARY", id, summary });
+    } catch (error) {
+      console.error("Failed to update summary:", error);
+    }
+  }
 
-// 캐싱 시스템
-const summaryCache = new Map<string, string>();
-const MAX_CACHE_SIZE = 50;
+  static async getCachedSummary(contentHash: string): Promise<string | null> {
+    try {
+      const response = await this.sendMessage({ type: "GET_CACHED_SUMMARY", contentHash });
+      return response.cached || null;
+    } catch (error) {
+      console.error("Failed to get cached summary:", error);
+      return null;
+    }
+  }
 
-// 캐시 키 생성 함수
-function generateCacheKey(content: string): string {
-  // 간단한 해시 함수 (실제 프로덕션에서는 더 강력한 해시 함수 사용)
+  static async setCachedSummary(contentHash: string, summary: string): Promise<void> {
+    try {
+      await this.sendMessage({ type: "SET_CACHED_SUMMARY", contentHash, summary });
+    } catch (error) {
+      console.error("Failed to set cached summary:", error);
+    }
+  }
+}
+
+// 로컬 상태 (UI용)
+let localHistory: SummaryItem[] = [];
+let activeSummaryRequests = new Map<string, SummaryItem>();
+
+// 해시 생성 함수
+function generateHash(content: string): string {
   let hash = 0;
   for (let i = 0; i < content.length; i++) {
     const char = content.charCodeAt(i);
     hash = (hash << 5) - hash + char;
-    hash = hash & hash; // 32비트 정수로 변환
+    hash = hash & hash;
   }
   return hash.toString();
 }
 
-// 캐시 정리 함수
-function cleanupCache() {
-  if (summaryCache.size > MAX_CACHE_SIZE) {
-    const keysToDelete = Array.from(summaryCache.keys()).slice(0, summaryCache.size - MAX_CACHE_SIZE);
-    keysToDelete.forEach((key) => summaryCache.delete(key));
-  }
-}
+// 서비스워커에서 오는 메시지 리스너
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  switch (message.type) {
+    case "HISTORY_UPDATED":
+      localHistory.unshift(message.item);
+      renderHistory();
+      break;
 
-// 메모리 정리 함수
-function cleanupMemory() {
-  // 히스토리 제한
-  if (summaryHistory.length > MAX_HISTORY_ITEMS) {
-    summaryHistory = summaryHistory.slice(-MAX_HISTORY_ITEMS);
+    case "SUMMARY_UPDATED":
+      const item = localHistory.find((item) => item.id === message.id);
+      if (item) {
+        item.summary = message.summary;
+        renderHistory();
+      }
+      break;
   }
-
-  // 가비지 컬렉션 힌트 (브라우저가 지원하는 경우)
-  if ((window as any).gc) {
-    (window as any).gc();
-  }
-}
-
-// 페이지 언로드 시 자원 정리
-window.addEventListener("beforeunload", () => {
-  summaryHistory = [];
 });
 
 // UI 업데이트 통합 함수
-function updateUI(type: "button" | "loading" | "summary", data?: any) {
+function updateUI(type: "button" | "loading", data?: any) {
   switch (type) {
     case "button":
       const btn = extractButton as HTMLButtonElement;
@@ -95,23 +247,59 @@ function updateUI(type: "button" | "loading" | "summary", data?: any) {
     case "loading":
       document.getElementById("loading-indicator")!.style.display = data.show ? "block" : "none";
       break;
-    case "summary":
-      if (data.summaryDiv && data.content) {
-        data.summaryDiv.innerHTML = data.content.replace(/\n/g, "<br>");
+  }
+}
+
+// 실시간 요약 업데이트
+function updateSummaryInPlace(itemId: string, partialSummary: string) {
+  const item = localHistory.find((item) => item.id === itemId);
+  if (item) {
+    item.summary = partialSummary;
+    // DOM에서 해당 요소만 업데이트
+    const card = document.querySelector(`[data-id="${itemId}"]`);
+    if (card) {
+      const summaryDiv = card.querySelector(".summary-text") as HTMLElement;
+      if (summaryDiv) {
+        summaryDiv.innerHTML = partialSummary.replace(/\n/g, "<br>");
       }
-      break;
+    }
+  }
+}
+
+// 요약 완료 처리
+async function finalizeSummary(itemId: string, finalSummary: string) {
+  const item = localHistory.find((item) => item.id === itemId);
+  if (item) {
+    // 서비스워커에 최종 요약 저장
+    await ServiceWorkerAPI.updateSummary(item.id, finalSummary);
+
+    // 로컬 상태 업데이트
+    item.summary = finalSummary;
+
+    // 캐시에도 저장
+    const contentHash = generateHash(item.content);
+    await ServiceWorkerAPI.setCachedSummary(contentHash, finalSummary);
+
+    renderHistory();
+  }
+}
+
+// 요약 에러 처리
+function handleSummaryError(itemId: string, error: string) {
+  const item = localHistory.find((item) => item.id === itemId);
+  if (item) {
+    item.summary = `요약 중 오류가 발생했습니다: ${error}`;
+    renderHistory();
   }
 }
 
 function renderHistory() {
   historyWrapper.innerHTML = "";
-  summaryHistory
-    .slice()
-    .reverse()
-    .forEach((item) => {
-      const card = document.createElement("div");
-      card.className = "history-card";
-      card.innerHTML = `
+  localHistory.forEach((item) => {
+    const card = document.createElement("div");
+    card.className = "history-card";
+    card.setAttribute("data-id", item.id);
+    card.innerHTML = `
       <div class="section-container">
         <div class="content-text">
           <div class="content-title">
@@ -130,181 +318,229 @@ function renderHistory() {
         <button class="copy-button" title="Copy the Summary to the Clipboard">
           <i class="fa-solid fa-copy fa-lg"></i>
         </button>
+        <button class="delete-button" title="Delete this summary" data-id="${item.id}">
+          <i class="fa-solid fa-trash fa-sm"></i>
+        </button>
       </div>
     `;
 
-      // 본문 더보기/접기
-      const contentBody = card.querySelector(".content-body") as HTMLElement;
-      const toggleBtn = card.querySelector(".content-title .toggle-button")!;
-      const contentDiv = card.querySelector(".content-text")!;
-
-      toggleBtn.addEventListener("click", () => {
-        const isHidden = contentBody.style.display === "none";
-        contentBody.style.display = isHidden ? "block" : "none";
-        contentDiv.classList.toggle("expanded", isHidden);
-        toggleBtn.textContent = isHidden ? "접기" : "더보기";
-      });
-
-      // 요약 더보기/접기
-      const summaryDiv = card.querySelector(".summary-text")!;
-      const summaryToggleBtn = card.querySelectorAll(".toggle-button")[1] as HTMLButtonElement;
-
-      // 요약 길이에 따른 토글 버튼 표시 여부 결정
-      const lineHeight = parseFloat(getComputedStyle(summaryDiv).lineHeight) || 16;
-      const maxHeight = lineHeight * 4;
-
-      if (item.summary && item.summary !== "요약 중..." && summaryDiv.scrollHeight > maxHeight + 2) {
-        summaryToggleBtn.style.display = "inline-block";
-        summaryToggleBtn.textContent = "접기";
-        summaryDiv.classList.add("expanded");
-
-        summaryToggleBtn.addEventListener("click", () => {
-          const isExpanded = summaryDiv.classList.contains("expanded");
-          summaryDiv.classList.toggle("expanded", !isExpanded);
-          summaryToggleBtn.textContent = isExpanded ? "더보기" : "접기";
-        });
-      } else {
-        summaryToggleBtn.style.display = "none";
-        summaryDiv.classList.add("expanded");
-      }
-
-      // 복사 기능
-      card.querySelector(".copy-button")!.addEventListener("click", () => {
-        navigator.clipboard.writeText(item.summary).catch((err) => console.error("Could not copy text: ", err));
-      });
-
-      historyWrapper.appendChild(card);
-    });
+    // 이벤트 리스너 추가
+    setupCardEventListeners(card, item);
+    historyWrapper.appendChild(card);
+  });
 }
 
-// 스트림 처리 및 요약 함수 통합 - 디바운싱 적용
-let summaryTimeout: NodeJS.Timeout | null = null;
-async function streamSummary(content: string, summaryDiv: HTMLElement): Promise<string> {
-  let summary = "";
+function setupCardEventListeners(card: Element, item: SummaryItem) {
+  // 본문 더보기/접기
+  const contentBody = card.querySelector(".content-body") as HTMLElement;
+  const toggleBtn = card.querySelector(".content-title .toggle-button")!;
+  const contentDiv = card.querySelector(".content-text")!;
 
-  try {
-    // 콘텐츠 길이 제한
-    const truncatedContent =
-      content.length > MAX_CONTENT_LENGTH ? content.substring(0, MAX_CONTENT_LENGTH) + "..." : content;
+  toggleBtn.addEventListener("click", () => {
+    const isHidden = contentBody.style.display === "none";
+    contentBody.style.display = isHidden ? "block" : "none";
+    contentDiv.classList.toggle("expanded", isHidden);
+    toggleBtn.textContent = isHidden ? "접기" : "더보기";
+  });
 
-    // 캐시 확인
-    const cacheKey = generateCacheKey(truncatedContent);
-    if (summaryCache.has(cacheKey)) {
-      const cachedSummary = summaryCache.get(cacheKey)!;
-      updateUI("summary", { summaryDiv, content: cachedSummary });
-      return cachedSummary;
-    }
+  // 요약 더보기/접기
+  const summaryDiv = card.querySelector(".summary-text")!;
+  const summaryToggleBtn = card.querySelectorAll(".toggle-button")[1] as HTMLButtonElement;
 
-    const completion = await engine.chat.completions.create({
-      stream: true,
-      messages: [{ role: "user", content: `다음 본문을 한국어로 간결하게 요약해줘.\n\n${truncatedContent}` }],
-      extra_body: {
-        enable_thinking: false,
-      },
+  const lineHeight = parseFloat(getComputedStyle(summaryDiv).lineHeight) || 16;
+  const maxHeight = lineHeight * 4;
+
+  if (item.summary && item.summary !== "요약 중..." && summaryDiv.scrollHeight > maxHeight + 2) {
+    summaryToggleBtn.style.display = "inline-block";
+    summaryToggleBtn.textContent = "접기";
+    summaryDiv.classList.add("expanded");
+
+    summaryToggleBtn.addEventListener("click", () => {
+      const isExpanded = summaryDiv.classList.contains("expanded");
+      summaryDiv.classList.toggle("expanded", !isExpanded);
+      summaryToggleBtn.textContent = isExpanded ? "더보기" : "접기";
     });
-
-    // 스트림 처리 최적화 - 100ms 간격으로 UI 업데이트
-    for await (const chunk of completion) {
-      const delta = chunk.choices[0].delta.content;
-      if (delta) {
-        summary += delta;
-
-        // 디바운싱으로 UI 업데이트 최적화
-        if (summaryTimeout) {
-          clearTimeout(summaryTimeout);
-        }
-        summaryTimeout = setTimeout(() => {
-          updateUI("summary", { summaryDiv, content: summary });
-        }, 100);
-      }
-    }
-
-    // 최종 업데이트
-    if (summaryTimeout) {
-      clearTimeout(summaryTimeout);
-    }
-    updateUI("summary", { summaryDiv, content: summary });
-
-    // 최종 메시지 정리
-    const finalMessage = await engine.getMessage();
-    const cleanedMessage = finalMessage.replace(/^\s+|\s+$/g, "");
-
-    // 캐시에 저장
-    summaryCache.set(cacheKey, cleanedMessage);
-    cleanupCache();
-
-    return cleanedMessage;
-  } catch (error) {
-    console.error("Error during summarization:", error);
-    throw error;
+  } else {
+    summaryToggleBtn.style.display = "none";
+    summaryDiv.classList.add("expanded");
   }
+
+  // 복사 기능
+  card.querySelector(".copy-button")!.addEventListener("click", () => {
+    navigator.clipboard.writeText(item.summary).catch((err) => console.error("Could not copy text: ", err));
+  });
 }
 
-extractButton.addEventListener("click", () => {
-  updateUI("button", { loading: true });
-  updateUI("loading", { show: true });
+// 서비스워커 준비 상태 확인
+async function waitForServiceWorker(): Promise<boolean> {
+  return new Promise((resolve) => {
+    let attempts = 0;
+    const maxAttempts = 15;
 
-  chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
-    if (!tabs[0]?.id) {
-      updateUI("button", { loading: false });
-      updateUI("loading", { show: false });
+    const checkServiceWorker = () => {
+      attempts++;
+      console.log(`Service worker ping attempt ${attempts}/${maxAttempts}`);
+
+      chrome.runtime.sendMessage({ type: "PING" }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.error(`Ping attempt ${attempts} failed:`, chrome.runtime.lastError.message);
+
+          if (attempts < maxAttempts) {
+            setTimeout(checkServiceWorker, 1000);
+          } else {
+            console.error("Service worker not responding after", maxAttempts, "attempts");
+            alert("서비스워커 연결 실패. 확장 프로그램을 다시 로드해주세요.");
+            resolve(false);
+          }
+        } else {
+          console.log(`Service worker responded successfully on attempt ${attempts}`);
+          resolve(true);
+        }
+      });
+    };
+
+    setTimeout(checkServiceWorker, 100);
+  });
+}
+
+// 초기화 함수
+async function initializeUI() {
+  try {
+    // 로딩 상태 표시
+    showLoadingState();
+
+    // 서비스워커 준비 대기
+    const isReady = await waitForServiceWorker();
+    if (!isReady) {
+      console.warn("Service worker not ready");
+      hideLoadingState();
       return;
     }
 
-    chrome.tabs.sendMessage(tabs[0].id, { type: "EXTRACT_MAIN_CONTENT" }, async (response) => {
-      try {
-        if (!response?.content) {
-          throw new Error("본문 추출에 실패했습니다.");
-        }
+    // 웹워커 초기화 (사이드패널에서)
+    initializeMLCWorker();
 
-        const { content, title } = response;
+    // 히스토리 로드
+    localHistory = await ServiceWorkerAPI.getHistory(20);
+    renderHistory();
 
-        // 콘텐츠 길이 제한 적용
-        const truncatedContent =
-          content.length > MAX_CONTENT_LENGTH ? content.substring(0, MAX_CONTENT_LENGTH) + "..." : content;
+    hideLoadingState();
+    console.log("UI initialized successfully");
 
-        const timestamp = new Date().toLocaleString("en-US", {
-          month: "short",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        });
+    // 웹워커가 준비되면 자동으로 엔진 초기화됨
+  } catch (error) {
+    console.error("Failed to initialize UI:", error);
+    hideLoadingState();
+  }
+}
 
-        // 히스토리에 빈 항목 추가하고 렌더링
-        summaryHistory.push({ content: truncatedContent, summary: "요약 중...", timestamp, title });
+// 로딩 상태 함수
+function showLoadingState() {
+  const loadingDiv = document.createElement("div");
+  loadingDiv.id = "initial-loading";
+  loadingDiv.innerHTML = `
+    <div style="text-align: center; padding: 20px; color: #666;">
+      <div>시스템 초기화 중...</div>
+      <div style="margin-top: 10px; font-size: 0.9em;">
+        WebLLM 엔진을 로드하고 있습니다
+      </div>
+    </div>
+  `;
+  historyWrapper.appendChild(loadingDiv);
+}
 
-        // 메모리 정리
-        cleanupMemory();
+function hideLoadingState() {
+  const loadingDiv = document.getElementById("initial-loading");
+  if (loadingDiv) {
+    loadingDiv.remove();
+  }
+}
 
-        renderHistory();
+// 메인 요약 버튼 이벤트
+extractButton.addEventListener("click", async () => {
+  updateUI("button", { loading: true });
+  updateUI("loading", { show: true });
 
-        // 마지막 카드의 summary DOM 참조
-        const lastCard = historyWrapper.querySelector(".history-card");
-        const summaryDiv = lastCard?.querySelector(".summary-text") as HTMLElement;
+  try {
+    // 엔진 준비 확인
+    if (!isEngineReady) {
+      alert("엔진이 아직 준비되지 않았습니다. 잠시 후 다시 시도해주세요.");
+      return;
+    }
 
-        if (summaryDiv) {
-          // 스트림 처리로 요약 생성
-          const finalSummary = await streamSummary(content, summaryDiv);
+    // 현재 탭 정보 가져오기
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tabs[0]?.id) {
+      throw new Error("활성 탭을 찾을 수 없습니다.");
+    }
 
-          // 히스토리 업데이트
-          summaryHistory[summaryHistory.length - 1].summary = finalSummary || "요약 실패";
-
-          // 최종 렌더링
-          renderHistory();
-        }
-      } catch (error) {
-        console.error("Error:", error);
-        if (summaryHistory.length > 0) {
-          summaryHistory[summaryHistory.length - 1].summary = "요약 중 오류가 발생했습니다.";
-          renderHistory();
-        } else {
-          alert(error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.");
-        }
-      } finally {
-        updateUI("button", { loading: false });
-        updateUI("loading", { show: false });
-      }
+    // 본문 추출
+    const response: any = await new Promise((resolve) => {
+      chrome.tabs.sendMessage(tabs[0].id!, { type: "EXTRACT_MAIN_CONTENT" }, resolve);
     });
-  });
+
+    if (!response?.content) {
+      throw new Error("본문 추출에 실패했습니다.");
+    }
+
+    const { content, title } = response;
+    const currentUrl = tabs[0].url || "";
+
+    // 캐시 확인
+    const contentHash = generateHash(content);
+    const cachedSummary = await ServiceWorkerAPI.getCachedSummary(contentHash);
+
+    const timestamp = new Date().toLocaleString("en-US", {
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+
+    // 서비스워커에 새 항목 추가
+    const newItem = await ServiceWorkerAPI.addSummaryItem({
+      content: content.length > 3000 ? content.substring(0, 3000) + "..." : content,
+      summary: cachedSummary || "요약 중...",
+      timestamp,
+      title,
+      url: currentUrl,
+    });
+
+    // 로컬 히스토리에 추가 및 UI 업데이트
+    localHistory.unshift(newItem);
+    renderHistory();
+
+    if (cachedSummary) {
+      console.log("Summary loaded from cache");
+      await ServiceWorkerAPI.updateSummary(newItem.id, cachedSummary);
+    } else {
+      // 웹워커에 요약 요청
+      const requestId = ++currentRequestId;
+
+      sendToWorker("GENERATE_SUMMARY", {
+        content,
+        requestId,
+        itemId: newItem.id,
+      });
+    }
+  } catch (error) {
+    console.error("Error:", error);
+    alert(error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.");
+  } finally {
+    updateUI("button", { loading: false });
+    updateUI("loading", { show: false });
+  }
+});
+
+// 페이지 언로드 시 웹워커 정리
+window.addEventListener("beforeunload", () => {
+  if (mlcWorker) {
+    mlcWorker.terminate();
+  }
+});
+
+// 페이지 로드 시 초기화
+document.addEventListener("DOMContentLoaded", () => {
+  initializeUI();
 });
