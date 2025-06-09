@@ -46,6 +46,8 @@ addStyles(`
     cursor: pointer;
     font-size: 1em;
     transition: background-color 0.2s;
+    transform: translateZ(0);
+    backface-visibility: hidden;
   }
 
   #extract-button:hover {
@@ -136,6 +138,9 @@ addStyles(`
     overflow: hidden;
     transition: max-height 0.3s ease-out;
     line-height: 1.5;
+    /* GPU 가속을 위한 레이어 생성 */
+    will-change: max-height;
+    transform: translateZ(0);
   }
 
   .content-text {
