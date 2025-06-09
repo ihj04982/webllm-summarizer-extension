@@ -27,13 +27,14 @@ const initProgressCallback = (report: InitProgressReport) => {
 };
 
 // 웹워커 엔진 초기화
-const engine: MLCEngineInterface = await CreateWebWorkerMLCEngine(
+const engine = await CreateWebWorkerMLCEngine(
   new Worker(new URL("./worker.ts", import.meta.url), { type: "module" }),
-  "Qwen2-0.5B-Instruct-q4f16_1-MLC",
+  "Qwen3-4B-q4f16_1-MLC",
   {
     initProgressCallback: initProgressCallback,
   }
 );
+
 let summaryHistory: { content: string; summary: string; timestamp: string; title: string }[] = [];
 
 function enableInputs() {
@@ -174,6 +175,9 @@ extractButton.addEventListener("click", () => {
             const completion = await engine.chat.completions.create({
               stream: true,
               messages: [{ role: "user", content: `다음 본문을 한국어로 간결하게 요약해줘.\n\n${content}` }],
+              extra_body: {
+                enable_thinking: false,
+              },
             });
 
             // 마지막 카드의 summary DOM을 직접 참조
