@@ -1,3 +1,5 @@
+import { ExtensionServiceWorkerMLCEngineHandler } from "@mlc-ai/web-llm";
+
 // 서비스워커 중앙 데이터 관리
 interface SummaryItem {
   content: string;
@@ -206,4 +208,20 @@ chrome.action.onClicked.addListener((tab: chrome.tabs.Tab) => {
   } else {
     console.error("No window ID found for tab");
   }
+});
+
+// WebLLM Extension Service Worker Handler
+let mlcHandler: ExtensionServiceWorkerMLCEngineHandler | undefined;
+
+// WebLLM 포트 연결 처리
+chrome.runtime.onConnect.addListener(function (port) {
+  console.assert(port.name === "web_llm_service_worker");
+  if (mlcHandler === undefined) {
+    mlcHandler = new ExtensionServiceWorkerMLCEngineHandler(port);
+    console.log("WebLLM handler created");
+  } else {
+    mlcHandler.setPort(port);
+    console.log("WebLLM handler port updated");
+  }
+  port.onMessage.addListener(mlcHandler.onmessage.bind(mlcHandler));
 });

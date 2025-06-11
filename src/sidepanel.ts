@@ -1,5 +1,12 @@
 import * as ProgressBar from "progressbar.js";
 import "./styles";
+import {
+  CreateExtensionServiceWorkerMLCEngine,
+  MLCEngineInterface,
+  InitProgressReport,
+  ChatCompletionMessageParam,
+} from "@mlc-ai/web-llm";
+// import * as webllm from "@mlc-ai/web-llm"; // Chrome Extension에서는 포트 통신 사용
 
 const extractButton = document.getElementById("extract-button")!;
 const historyWrapper = document.getElementById("historyWrapper")!;
@@ -26,182 +33,12 @@ const progressBar = new ProgressBar.Line("#loadingContainer", {
   svgStyle: { width: "100%", height: "100%" },
 });
 
-// 웹워커 관리 (사이드패널에서)
-let mlcWorker: Worker | null = null;
+// Chrome Extension에서는 manifest.json에서 서비스워커가 자동으로 등록됨
+
+// WebLLM Engine 관리
+let engine: MLCEngineInterface | null = null;
 let isEngineReady = false;
 let currentRequestId = 0;
-
-// 웹워커 초기화
-function initializeMLCWorker() {
-  if (mlcWorker) {
-    mlcWorker.terminate();
-  }
-
-  mlcWorker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
-
-  mlcWorker.onmessage = (event) => {
-    const { type, data } = event.data;
-
-    switch (type) {
-      case "WORKER_READY":
-        console.log("MLC Worker ready");
-        // 웹워커 준비 완료 후 엔진 초기화 시작
-        setTimeout(() => {
-          sendToWorker("INIT_ENGINE");
-        }, 100);
-        break;
-
-      case "ENGINE_INIT_START":
-        console.log("Engine initialization started");
-        loadingContainerWrapper.style.display = "flex";
-        break;
-
-      case "ENGINE_INIT_PROGRESS":
-        progressBar.animate(data.progress, { duration: 50 });
-        console.log(`Engine loading: ${(data.progress * 100).toFixed(1)}%`);
-        break;
-
-      case "ENGINE_INIT_COMPLETE":
-        console.log("Engine initialization complete");
-        isEngineReady = true;
-        loadingContainerWrapper.style.display = "none";
-        const loadingBarContainer = document.getElementById("loadingContainer");
-        if (loadingBarContainer) {
-          loadingBarContainer.remove();
-        }
-        break;
-
-      case "ENGINE_INIT_ERROR":
-        console.error("Engine initialization failed:", data.error);
-        isEngineReady = false;
-        loadingContainerWrapper.style.display = "none";
-        alert(`엔진 초기화 실패: ${data.error}`);
-        break;
-
-      case "SUMMARY_START":
-        console.log(`Summary generation started for request ${data.requestId}`);
-        break;
-
-      case "SUMMARY_PROGRESS":
-        // 실시간 요약 업데이트
-        updateSummaryInPlace(data.itemId, data.partialSummary);
-        break;
-
-      case "SUMMARY_COMPLETE":
-        console.log(`Summary generation complete for request ${data.requestId}`);
-        finalizeSummary(data.itemId, data.summary);
-        break;
-
-      case "SUMMARY_ERROR":
-        console.error(`Summary generation failed for request ${data.requestId}:`, data.error);
-        handleSummaryError(data.itemId, data.error);
-        break;
-
-      case "WORKER_ERROR":
-        console.error("Worker error:", data.error);
-        break;
-
-      default:
-        console.log("Unknown worker message:", type);
-    }
-  };
-
-  mlcWorker.onerror = (error) => {
-    console.error("Worker error:", error);
-  };
-
-  return mlcWorker;
-}
-
-// 웹워커에 메시지 전송
-function sendToWorker(type: string, data?: any) {
-  if (!mlcWorker) {
-    console.error("Worker not initialized");
-    return;
-  }
-
-  mlcWorker.postMessage({ type, data });
-}
-
-// 서비스워커와 통신하는 헬퍼 함수들
-class ServiceWorkerAPI {
-  private static async sendMessage(message: any): Promise<any> {
-    return new Promise((resolve, reject) => {
-      try {
-        chrome.runtime.sendMessage(message, (response) => {
-          if (chrome.runtime.lastError) {
-            console.error("Chrome runtime error:", chrome.runtime.lastError);
-            reject(new Error(chrome.runtime.lastError.message));
-            return;
-          }
-
-          if (!response) {
-            console.warn("No response from service worker for:", message.type);
-            resolve({});
-            return;
-          }
-
-          resolve(response);
-        });
-      } catch (error) {
-        console.error("Error sending message to service worker:", error);
-        reject(error);
-      }
-    });
-  }
-
-  static async getHistory(limit?: number): Promise<SummaryItem[]> {
-    try {
-      const response = await this.sendMessage({ type: "GET_HISTORY", limit });
-      return response.history || [];
-    } catch (error) {
-      console.error("Failed to get history:", error);
-      return [];
-    }
-  }
-
-  static async addSummaryItem(item: Omit<SummaryItem, "id">): Promise<SummaryItem> {
-    try {
-      const response = await this.sendMessage({ type: "ADD_SUMMARY_ITEM", item });
-      if (!response.item) {
-        throw new Error("Failed to add summary item - no item in response");
-      }
-      return response.item;
-    } catch (error) {
-      console.error("Failed to add summary item:", error);
-      return {
-        ...item,
-        id: "temp_" + Date.now().toString(),
-      };
-    }
-  }
-
-  static async updateSummary(id: string, summary: string): Promise<void> {
-    try {
-      await this.sendMessage({ type: "UPDATE_SUMMARY", id, summary });
-    } catch (error) {
-      console.error("Failed to update summary:", error);
-    }
-  }
-
-  static async getCachedSummary(contentHash: string): Promise<string | null> {
-    try {
-      const response = await this.sendMessage({ type: "GET_CACHED_SUMMARY", contentHash });
-      return response.cached || null;
-    } catch (error) {
-      console.error("Failed to get cached summary:", error);
-      return null;
-    }
-  }
-
-  static async setCachedSummary(contentHash: string, summary: string): Promise<void> {
-    try {
-      await this.sendMessage({ type: "SET_CACHED_SUMMARY", contentHash, summary });
-    } catch (error) {
-      console.error("Failed to set cached summary:", error);
-    }
-  }
-}
 
 // 로컬 상태 (UI용)
 let localHistory: SummaryItem[] = [];
@@ -418,7 +255,7 @@ async function initializeUI() {
     }
 
     // 웹워커 초기화 (사이드패널에서)
-    initializeMLCWorker();
+    initializeMLCEngine();
 
     // 히스토리 로드
     localHistory = await ServiceWorkerAPI.getHistory(20);
@@ -515,14 +352,9 @@ extractButton.addEventListener("click", async () => {
       console.log("Summary loaded from cache");
       await ServiceWorkerAPI.updateSummary(newItem.id, cachedSummary);
     } else {
-      // 웹워커에 요약 요청
+      // WebLLM 엔진으로 직접 요약 요청
       const requestId = ++currentRequestId;
-
-      sendToWorker("GENERATE_SUMMARY", {
-        content,
-        requestId,
-        itemId: newItem.id,
-      });
+      await generateSummaryWithEngine(newItem.id, content, requestId);
     }
   } catch (error) {
     console.error("Error:", error);
@@ -533,10 +365,11 @@ extractButton.addEventListener("click", async () => {
   }
 });
 
-// 페이지 언로드 시 웹워커 정리
+// 페이지 언로드 시 엔진 정리 (WebLLM 엔진은 자동으로 정리됨)
 window.addEventListener("beforeunload", () => {
-  if (mlcWorker) {
-    mlcWorker.terminate();
+  if (engine) {
+    console.log("Cleaning up WebLLM engine...");
+    // WebLLM 엔진은 자동으로 정리되므로 별도 terminate가 필요하지 않음
   }
 });
 
@@ -544,3 +377,195 @@ window.addEventListener("beforeunload", () => {
 document.addEventListener("DOMContentLoaded", () => {
   initializeUI();
 });
+
+// 서비스워커와 통신하는 헬퍼 함수들
+class ServiceWorkerAPI {
+  private static async sendMessage(message: any): Promise<any> {
+    return new Promise((resolve, reject) => {
+      try {
+        chrome.runtime.sendMessage(message, (response) => {
+          if (chrome.runtime.lastError) {
+            console.error("Chrome runtime error:", chrome.runtime.lastError);
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+
+          if (!response) {
+            console.warn("No response from service worker for:", message.type);
+            resolve({});
+            return;
+          }
+
+          resolve(response);
+        });
+      } catch (error) {
+        console.error("Error sending message to service worker:", error);
+        reject(error);
+      }
+    });
+  }
+
+  static async getHistory(limit?: number): Promise<SummaryItem[]> {
+    try {
+      const response = await this.sendMessage({ type: "GET_HISTORY", limit });
+      return response.history || [];
+    } catch (error) {
+      console.error("Failed to get history:", error);
+      return [];
+    }
+  }
+
+  static async addSummaryItem(item: Omit<SummaryItem, "id">): Promise<SummaryItem> {
+    try {
+      const response = await this.sendMessage({ type: "ADD_SUMMARY_ITEM", item });
+      if (!response.item) {
+        throw new Error("Failed to add summary item - no item in response");
+      }
+      return response.item;
+    } catch (error) {
+      console.error("Failed to add summary item:", error);
+      return {
+        ...item,
+        id: "temp_" + Date.now().toString(),
+      };
+    }
+  }
+
+  static async updateSummary(id: string, summary: string): Promise<void> {
+    try {
+      await this.sendMessage({ type: "UPDATE_SUMMARY", id, summary });
+    } catch (error) {
+      console.error("Failed to update summary:", error);
+    }
+  }
+
+  static async getCachedSummary(contentHash: string): Promise<string | null> {
+    try {
+      const response = await this.sendMessage({ type: "GET_CACHED_SUMMARY", contentHash });
+      return response.cached || null;
+    } catch (error) {
+      console.error("Failed to get cached summary:", error);
+      return null;
+    }
+  }
+
+  static async setCachedSummary(contentHash: string, summary: string): Promise<void> {
+    try {
+      await this.sendMessage({ type: "SET_CACHED_SUMMARY", contentHash, summary });
+    } catch (error) {
+      console.error("Failed to set cached summary:", error);
+    }
+  }
+}
+
+// WebLLM 엔진으로 직접 요약 생성
+async function generateSummaryWithEngine(itemId: string, content: string, requestId: number) {
+  if (!engine) {
+    throw new Error("Engine not connected");
+  }
+
+  const MAX_CONTENT_LENGTH = 3000;
+  const truncatedContent =
+    content.length > MAX_CONTENT_LENGTH ? content.substring(0, MAX_CONTENT_LENGTH) + "..." : content;
+
+  try {
+    // WebLLM 엔진으로 스트리밍 요약 요청 전송 (예제 방식)
+    const messages: ChatCompletionMessageParam[] = [
+      {
+        role: "system",
+        content: `당신은 전문적인 한국어 요약 전문가입니다. 주어진 텍스트를 다음 규칙에 따라 요약해주세요:
+
+1. **언어**: 반드시 한국어로 작성
+2. **길이**: 3-4문장으로 간결하게 작성
+3. **구조**: 
+   - 첫 문장: 주제/핵심 내용 소개
+   - 중간 문장들: 중요한 세부사항 2-3개
+   - 마지막 문장: 결론 또는 의미/영향
+4. **톤**: 객관적이고 정보 전달 중심
+5. **포함 요소**: 
+   - 핵심 사실과 데이터
+   - 중요한 인물/기관명
+   - 주요 결과나 영향
+6. **제외 요소**: 
+   - 불필요한 세부사항
+   - 반복적인 내용
+   - 개인적 의견이나 추측
+
+텍스트의 언어가 한국어가 아니더라도 반드시 한국어로 요약해야 합니다.`,
+      },
+      {
+        role: "user",
+        content: `다음 텍스트를 위의 규칙에 따라 한국어로 요약해주세요:\n\n${truncatedContent}`,
+      },
+    ];
+
+    const completion = await engine.chat.completions.create({
+      stream: true,
+      messages: messages,
+      max_tokens: 800,
+      temperature: 0.3,
+      extra_body: {
+        enable_thinking: false,
+      },
+    });
+
+    let summary = "";
+    for await (const chunk of completion) {
+      const curDelta = chunk.choices[0]?.delta?.content;
+      if (curDelta) {
+        summary += curDelta;
+        // 실시간 업데이트
+        updateSummaryInPlace(itemId, summary);
+      }
+    }
+
+    const finalSummary = await engine.getMessage();
+    await finalizeSummary(itemId, finalSummary);
+  } catch (error) {
+    console.error("Summary generation failed:", error);
+    handleSummaryError(itemId, error instanceof Error ? error.message : "Unknown error");
+  }
+}
+
+// WebLLM 엔진 초기화 (예제 방식)
+async function initializeMLCEngine() {
+  if (engine) {
+    console.log("Engine already initialized");
+    return;
+  }
+
+  try {
+    console.log("Initializing WebLLM Extension Service Worker Engine...");
+    loadingContainerWrapper.style.display = "flex";
+
+    const initProgressCallback = (report: InitProgressReport) => {
+      progressBar.animate(report.progress, { duration: 50 });
+      console.log(`Model loading: ${(report.progress * 100).toFixed(1)}%`);
+
+      if (report.progress === 1.0) {
+        console.log("WebLLM engine initialized successfully");
+        isEngineReady = true;
+        loadingContainerWrapper.style.display = "none";
+
+        const loadingBarContainer = document.getElementById("loadingContainer");
+        if (loadingBarContainer) {
+          loadingBarContainer.remove();
+        }
+      }
+    };
+
+    const selectedModel = "Qwen3-1.7B-q4f16_1-MLC";
+
+    // CreateExtensionServiceWorkerMLCEngine 사용 (예제 방식)
+    engine = await CreateExtensionServiceWorkerMLCEngine(selectedModel, {
+      initProgressCallback: initProgressCallback,
+    });
+
+    console.log("WebLLM Extension Service Worker Engine created successfully");
+  } catch (error) {
+    console.error("Failed to initialize WebLLM Extension Service Worker Engine:", error);
+    isEngineReady = false;
+    loadingContainerWrapper.style.display = "none";
+    alert(`WebLLM 초기화 실패: ${error}`);
+  }
+}
