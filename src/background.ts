@@ -8,6 +8,8 @@ interface SummaryItem {
   title: string;
   url: string;
   id: string;
+  status: "pending" | "in-progress" | "done" | "error";
+  error?: string | null;
 }
 
 class DataManager {
@@ -28,10 +30,12 @@ class DataManager {
     }
   }
 
-  async addSummary(item: Omit<SummaryItem, "id">) {
+  async addSummary(item: Omit<SummaryItem, "id" | "status" | "error">) {
     const newItem: SummaryItem = {
       ...item,
       id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+      status: "pending",
+      error: null,
     };
 
     this.summaryHistory.unshift(newItem);
@@ -44,12 +48,29 @@ class DataManager {
     return newItem;
   }
 
-  async updateSummary(id: string, summary: string) {
+  async updateSummary(
+    id: string,
+    summary: string,
+    status: "pending" | "in-progress" | "done" | "error" = "done",
+    error: string | null = null
+  ) {
     const item = this.summaryHistory.find((item) => item.id === id);
     if (item) {
       item.summary = summary;
+      item.status = status;
+      item.error = error;
       await this.persistData();
     }
+  }
+
+  async deleteSummary(id: string) {
+    const index = this.summaryHistory.findIndex((item) => item.id === id);
+    if (index !== -1) {
+      this.summaryHistory.splice(index, 1);
+      await this.persistData();
+      return true;
+    }
+    return false;
   }
 
   getHistory(limit?: number): SummaryItem[] {
@@ -141,7 +162,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       break;
 
     case "UPDATE_SUMMARY":
-      dataManager.updateSummary(message.id, message.summary).then(() => {
+      dataManager.updateSummary(message.id, message.summary, message.status, message.error).then(() => {
         sendResponse({ success: true });
         broadcastToSidePanels({ type: "SUMMARY_UPDATED", id: message.id, summary: message.summary });
       });
@@ -155,6 +176,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case "SET_CACHED_SUMMARY":
       dataManager.setCachedSummary(message.contentHash, message.summary);
       sendResponse({ success: true });
+      break;
+
+    case "DELETE_SUMMARY":
+      dataManager.deleteSummary(message.id).then((success) => {
+        sendResponse({ success });
+        if (success) {
+          broadcastToSidePanels({ type: "SUMMARY_DELETED", id: message.id });
+        }
+      });
       break;
 
     case "CLEANUP":
