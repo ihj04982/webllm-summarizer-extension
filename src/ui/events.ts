@@ -1,4 +1,4 @@
-import type { SummaryItem } from "../sidepanel";
+import type { SummaryItem } from "../types";
 
 export function setupCardEventListeners(
   card: Element,

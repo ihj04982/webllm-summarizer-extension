@@ -33,7 +33,7 @@ export class ServiceWorkerAPI {
     }
   }
 
-  static async addSummaryItem(limit: number, item: any): Promise<any> {
+  static async addSummaryItem(item: any, limit: number): Promise<any> {
     try {
       const response = await this.sendMessage({ type: "ADD_SUMMARY_ITEM", item, limit });
       if (!response.item) {
@@ -50,11 +50,11 @@ export class ServiceWorkerAPI {
   }
 
   static async updateSummary(
-    limit: number,
     id: string,
     summary: string,
     status: string,
-    error?: string
+    error: string | undefined,
+    limit: number
   ): Promise<void> {
     try {
       await this.sendMessage({ type: "UPDATE_SUMMARY", id, summary, status, error, limit });
@@ -81,7 +81,7 @@ export class ServiceWorkerAPI {
     }
   }
 
-  static async deleteSummary(limit: number, id: string): Promise<boolean> {
+  static async deleteSummary(id: string, limit: number): Promise<boolean> {
     try {
       const response = await this.sendMessage({ type: "DELETE_SUMMARY", id, limit });
       return response.success || false;

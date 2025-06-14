@@ -24,28 +24,16 @@ import {
   updateSummary as stateUpdateSummary,
   deleteSummary as stateDeleteSummary,
   setOnHistoryChanged,
+  setPartialSummary,
 } from "./state/state";
 import { renderHistory, updateUI, showToast } from "./ui/render";
 import { setupCardEventListeners } from "./ui/events";
 import { ServiceWorkerAPI } from "./sw/serviceWorkerAPI";
+import { SummaryStatus, SummaryItem } from "./types";
 
 const extractButton = document.getElementById("extract-button")!;
 const historyWrapper = document.getElementById("historyWrapper")!;
 const loadingContainerWrapper = document.getElementById("loadingContainerWrapper")!;
-
-// 서비스워커와 통신하는 인터페이스
-export type SummaryStatus = "pending" | "in-progress" | "done" | "error";
-
-export interface SummaryItem {
-  content: string;
-  summary: string;
-  timestamp: string;
-  title: string;
-  url: string;
-  id: string;
-  status: SummaryStatus;
-  error?: string;
-}
 
 let progressBar: InstanceType<typeof Line> | null = null;
 
@@ -131,17 +119,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // 실시간 요약 업데이트
 function updateSummaryInPlace(itemId: string, partialSummary: string) {
-  const item = getLocalHistory().find((item) => item.id === itemId);
-  if (item) {
-    item.summary = partialSummary;
-    const card = document.querySelector(`[data-id="${itemId}"]`);
-    if (card) {
-      const summaryDiv = card.querySelector(".summary-text") as HTMLElement;
-      if (summaryDiv) {
-        summaryDiv.innerHTML = partialSummary.replace(/\n/g, "<br>");
-      }
-    }
-  }
+  setPartialSummary(itemId, partialSummary);
 }
 
 // 요약 완료 처리
@@ -205,14 +183,29 @@ async function initializeUI() {
     }
 
     // 웹워커 초기화 (사이드패널에서)
-    initializeMLCEngine();
+    await initializeMLCEngine({
+      onProgress: (progress) => {
+        if (progressBar) progressBar.animate(progress, { duration: 50 });
+        const statusText = document.getElementById("model-status-text");
+        if (statusText) statusText.innerText = `모델 로딩 중... (${Math.round(progress * 100)}%)`;
+      },
+      onReady: () => {
+        hideLoadingState();
+        const statusText = document.getElementById("model-status-text");
+        if (statusText) statusText.innerText = "";
+      },
+      onError: (error) => {
+        hideLoadingState();
+        const statusText = document.getElementById("model-status-text");
+        if (statusText) statusText.innerText = "모델 로딩 실패";
+        showToast(`모델 초기화 실패: ${error}`, "error");
+      },
+    });
 
     // 히스토리 로드 (최대 MAX_HISTORY_ITEMS)
     await refreshLocalHistory(MAX_HISTORY_ITEMS);
 
-    hideLoadingState();
     console.log("UI initialized successfully");
-
     // 웹워커가 준비되면 자동으로 엔진 초기화됨
   } catch (error) {
     console.error("Failed to initialize UI:", error);
@@ -245,7 +238,7 @@ extractButton.addEventListener("click", async () => {
   updateUI("loading", { show: true }, extractButton, document.getElementById("loading-indicator")!);
   try {
     await initializeMLCEngine();
-    if (!isEngineReady) {
+    if (!getIsEngineReady()) {
       alert("엔진이 아직 준비되지 않았습니다. 잠시 후 다시 시도해주세요.");
       return;
     }

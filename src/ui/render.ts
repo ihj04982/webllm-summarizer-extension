@@ -1,9 +1,9 @@
 // 렌더링 관련 함수 및 헬퍼
 
-import type { SummaryItem } from "../sidepanel";
+import type { SummaryItem } from "../types";
 
 export function renderHistory(
-  historyToShow: SummaryItem[],
+  historyToShow: (SummaryItem & { partialSummary?: string })[],
   historyWrapper: HTMLElement,
   setupCardEventListeners: (card: Element, item: SummaryItem) => void
 ) {
@@ -29,6 +29,8 @@ export function renderHistory(
     let summaryHtml = "";
     if (item.status === "error") {
       summaryHtml = `<div class="summary-error">${item.error || "오류"}</div>`;
+    } else if (item.partialSummary) {
+      summaryHtml = item.partialSummary.replace(/\n/g, "<br>");
     } else {
       summaryHtml = item.summary.replace(/\n/g, "<br>");
     }

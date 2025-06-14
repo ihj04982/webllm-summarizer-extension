@@ -1,4 +1,4 @@
-import type { MLCEngineInterface, ChatCompletionMessageParam, InitProgressReport } from "@mlc-ai/web-llm";
+import type { MLCEngineInterface, ChatCompletionMessageParam } from "@mlc-ai/web-llm";
 
 let engine: MLCEngineInterface | null = null;
 let worker: Worker | null = null;
