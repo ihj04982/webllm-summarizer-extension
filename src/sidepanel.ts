@@ -1,6 +1,6 @@
 import "./styles";
 import {
-  CreateExtensionServiceWorkerMLCEngine,
+  CreateWebWorkerMLCEngine,
   MLCEngineInterface,
   InitProgressReport,
   ChatCompletionMessageParam,
@@ -596,18 +596,23 @@ async function initializeMLCEngine() {
     const statusText = document.getElementById("model-status-text");
     if (statusText) statusText.innerText = "모델 준비 중입니다...";
 
-    const selectedModel = "Qwen3-4B-q4f16_1-MLC";
-    engine = await CreateExtensionServiceWorkerMLCEngine(selectedModel, {
-      initProgressCallback: (report: InitProgressReport) => {
-        if (progressBar) progressBar.animate(report.progress, { duration: 50 });
-        if (statusText) statusText.innerText = `모델 로딩 중... (${Math.round(report.progress * 100)}%)`;
-        if (report.progress === 1.0) {
-          isEngineReady = true;
-          loadingContainerWrapper.style.display = "none";
-          if (statusText) statusText.innerText = "";
-        }
-      },
-    });
+    const selectedModel = "Qwen3-1.7B-q4f16_1-MLC";
+
+    engine = await CreateWebWorkerMLCEngine(
+      new Worker(new URL("./worker.ts", import.meta.url), { type: "module" }),
+      selectedModel,
+      {
+        initProgressCallback: (report: InitProgressReport) => {
+          if (progressBar) progressBar.animate(report.progress, { duration: 50 });
+          if (statusText) statusText.innerText = `모델 로딩 중... (${Math.round(report.progress * 100)}%)`;
+          if (report.progress === 1.0) {
+            isEngineReady = true;
+            loadingContainerWrapper.style.display = "none";
+            if (statusText) statusText.innerText = "";
+          }
+        },
+      }
+    );
     isEngineReady = true;
     loadingContainerWrapper.style.display = "none";
     if (statusText) statusText.innerText = "";
