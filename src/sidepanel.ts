@@ -549,6 +549,36 @@ class ServiceWorkerAPI {
   }
 }
 
+// Think tag buffer and cleaning helpers (function style)
+function createThinkTagBuffer(bufferSize = 20) {
+  return {
+    buffer: "",
+    bufferSize,
+    result: "",
+  };
+}
+
+function pushThinkTagBuffer(bufObj, chunk) {
+  let data = bufObj.buffer + chunk;
+  data = data.replace(/(<think>|<\/think>)[\r\n]*/g, "");
+  data = data.replace(/^[\r\n]+/, "");
+  bufObj.buffer = data.slice(-bufObj.bufferSize);
+  bufObj.result += data.slice(0, -bufObj.bufferSize);
+  return bufObj.result;
+}
+
+function flushThinkTagBuffer(bufObj) {
+  let data = bufObj.buffer.replace(/(<think>|<\/think>)[\r\n]*/g, "");
+  data = data.replace(/^[\r\n]+/, "");
+  bufObj.result += data;
+  bufObj.buffer = "";
+  return bufObj.result;
+}
+
+function cleanThinkTags(str) {
+  return str.replace(/(<think>|<\/think>)[\r\n]*/g, "").replace(/^[\r\n]+/, "");
+}
+
 // WebLLM 엔진으로 직접 요약 생성
 async function generateSummaryWithEngine(itemId: string, content: string, requestId: number) {
   if (!engine) {
@@ -575,15 +605,17 @@ async function generateSummaryWithEngine(itemId: string, content: string, reques
         enable_thinking: false,
       },
     });
-    let summary = "";
+    const bufObj = createThinkTagBuffer();
     for await (const chunk of completion) {
       const curDelta = chunk.choices[0]?.delta?.content;
       if (curDelta) {
-        summary += curDelta;
-        updateSummaryInPlace(itemId, summary);
+        pushThinkTagBuffer(bufObj, curDelta);
+        updateSummaryInPlace(itemId, bufObj.result);
       }
     }
-    const finalSummary = await engine.getMessage();
+    flushThinkTagBuffer(bufObj);
+    let finalSummary = await engine.getMessage();
+    finalSummary = cleanThinkTags(finalSummary);
     await finalizeSummary(itemId, finalSummary);
   } catch (error) {
     handleSummaryError(itemId, error instanceof Error ? error.message : "Unknown error");
@@ -625,6 +657,6 @@ async function initializeMLCEngine() {
     loadingContainerWrapper.style.display = "none";
     const statusText = document.getElementById("model-status-text");
     if (statusText) statusText.innerText = "모델 로딩 실패";
-    alert(`WebLLM 초기화 실패: ${error}`);
+    alert(`모델델 초기화 실패: ${error}`);
   }
 }
