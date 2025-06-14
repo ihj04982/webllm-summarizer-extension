@@ -363,6 +363,10 @@ extractButton.addEventListener("click", async () => {
     if (!tabs[0]?.id) {
       throw new Error("활성 탭을 찾을 수 없습니다.");
     }
+    await chrome.scripting.executeScript({
+      target: { tabId: tabs[0].id },
+      files: ["content.js"],
+    });
     const response: any = await new Promise((resolve) => {
       chrome.tabs.sendMessage(tabs[0].id!, { type: "EXTRACT_MAIN_CONTENT" }, resolve);
     });
