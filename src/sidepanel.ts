@@ -230,6 +230,9 @@ function hideLoadingState() {
   if (loadingDiv) {
     loadingDiv.remove();
   }
+  if (loadingContainerWrapper) {
+    loadingContainerWrapper.style.display = "none";
+  }
 }
 
 // 메인 요약 버튼 이벤트
