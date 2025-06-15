@@ -1,4 +1,9 @@
-import type { SummaryItem } from "../sidepanel";
+import { cleanThinkTags } from "../sidepanel";
+import { SummaryItem } from "../types";
+
+function normalizeNewlines(str: string) {
+  return str.replace(/\n{2,}/g, "\n");
+}
 
 export function renderHistory(cards: SummaryItem[], historyWrapper: HTMLElement) {
   historyWrapper.innerHTML = "";
@@ -23,10 +28,8 @@ export function renderHistory(cards: SummaryItem[], historyWrapper: HTMLElement)
     let summaryHtml = "";
     if (item.status === "error") {
       summaryHtml = `<div class="summary-error">${item.error || "오류"}</div>`;
-    } else if (item.status === "done") {
-      summaryHtml = item.summary.replace(/\n/g, "<br>");
     } else {
-      summaryHtml = item.summary.replace(/\n/g, "<br>");
+      summaryHtml = normalizeNewlines(cleanThinkTags(item.summary)).replace(/\n/g, "<br>");
     }
 
     // Always show retry button, disable if in-progress

@@ -118,8 +118,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 // 실시간 요약 업데이트
+function normalizeNewlines(str: string) {
+  return str.replace(/\n{2,}/g, "\n");
+}
+
 function updateSummaryInPlace(itemId: string, partialSummary: string) {
-  setPartialSummary(itemId, partialSummary);
+  setPartialSummary(itemId, cleanThinkTags(normalizeNewlines(partialSummary)));
 }
 
 // 요약 완료 처리
@@ -394,7 +398,7 @@ async function handleDeleteSummary(item) {
 }
 
 // Think tag buffer and cleaning helpers (function style)
-function createThinkTagBuffer(bufferSize = 20) {
+export function createThinkTagBuffer(bufferSize = 20) {
   return {
     buffer: "",
     bufferSize,
@@ -402,7 +406,7 @@ function createThinkTagBuffer(bufferSize = 20) {
   };
 }
 
-function pushThinkTagBuffer(bufObj, chunk) {
+export function pushThinkTagBuffer(bufObj, chunk) {
   let data = bufObj.buffer + chunk;
   data = data.replace(/(<think>|<\/think>)[\r\n]*/g, "");
   data = data.replace(/^[\r\n]+/, "");
@@ -411,7 +415,7 @@ function pushThinkTagBuffer(bufObj, chunk) {
   return bufObj.result;
 }
 
-function flushThinkTagBuffer(bufObj) {
+export function flushThinkTagBuffer(bufObj) {
   let data = bufObj.buffer.replace(/(<think>|<\/think>)[\r\n]*/g, "");
   data = data.replace(/^[\r\n]+/, "");
   bufObj.result += data;
@@ -419,6 +423,6 @@ function flushThinkTagBuffer(bufObj) {
   return bufObj.result;
 }
 
-function cleanThinkTags(str) {
-  return str.replace(/(<think>|<\/think>)[\r\n]*/g, "").replace(/^[\r\n]+/, "");
+export function cleanThinkTags(str) {
+  return str.replace(/<think>|<\/think>/g, "");
 }

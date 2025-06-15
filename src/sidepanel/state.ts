@@ -1,4 +1,4 @@
-import type { SummaryItem } from "../sidepanel";
+import { SummaryItem } from "../types";
 import { ServiceWorkerAPI } from "./serviceworker";
 
 let localHistory: SummaryItem[] = [];

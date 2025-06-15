@@ -1,6 +1,11 @@
 // 렌더링 관련 함수 및 헬퍼
 
 import type { SummaryItem } from "../types";
+import { cleanThinkTags } from "../sidepanel";
+
+function normalizeNewlines(str: string) {
+  return str.replace(/\n{2,}/g, "\n");
+}
 
 export function renderHistory(
   historyToShow: (SummaryItem & { partialSummary?: string })[],
@@ -30,9 +35,9 @@ export function renderHistory(
     if (item.status === "error") {
       summaryHtml = `<div class="summary-error">${item.error || "오류"}</div>`;
     } else if (item.partialSummary) {
-      summaryHtml = item.partialSummary.replace(/\n/g, "<br>");
+      summaryHtml = normalizeNewlines(cleanThinkTags(item.partialSummary)).replace(/\n/g, "<br>");
     } else {
-      summaryHtml = item.summary.replace(/\n/g, "<br>");
+      summaryHtml = normalizeNewlines(cleanThinkTags(item.summary)).replace(/\n/g, "<br>");
     }
 
     // Always show retry button, disable if in-progress
