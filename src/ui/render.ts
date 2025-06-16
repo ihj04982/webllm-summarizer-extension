@@ -89,7 +89,7 @@ export function updateUI(
     case "button":
       const btn = extractButton as HTMLButtonElement;
       btn.disabled = data.loading;
-      btn.innerText = "본문 추출 및 요약";
+      btn.innerText = "페이지 요약하기";
       break;
     case "loading":
       loadingIndicator.style.display = data.show ? "block" : "none";

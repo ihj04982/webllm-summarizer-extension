@@ -1,4 +1,5 @@
-import { ExtensionServiceWorkerMLCEngineHandler } from "@mlc-ai/web-llm";
+import { ExtensionServiceWorkerMLCEngineHandler, CreateWebWorkerMLCEngine } from "@mlc-ai/web-llm";
+import type { MLCEngineInterface, ChatCompletionMessageParam } from "@mlc-ai/web-llm";
 
 // 서비스워커 중앙 데이터 관리
 interface SummaryItem {
@@ -136,6 +137,53 @@ chrome.runtime.onInstalled.addListener(async () => {
 // 즉시 초기화
 initializeServiceWorker().catch(console.error);
 
+// 서비스워커 전용 엔진 관리
+let engine: MLCEngineInterface | null = null;
+let isEngineReady = false;
+let isInitializingEngine = false;
+
+async function getOrInitEngine() {
+  if (engine && isEngineReady) return engine;
+  if (isInitializingEngine) throw new Error("엔진 초기화 중입니다. 잠시 후 다시 시도해주세요.");
+  isInitializingEngine = true;
+  try {
+    const selectedModel = "Qwen2.5-7B-Instruct-q4f16_1-MLC";
+    engine = await CreateWebWorkerMLCEngine(null, selectedModel, {});
+    isEngineReady = true;
+    return engine;
+  } catch (e) {
+    engine = null;
+    isEngineReady = false;
+    throw e;
+  } finally {
+    isInitializingEngine = false;
+  }
+}
+
+async function summarizeWithEngine(content: string) {
+  const MAX_CONTENT_LENGTH = 3000;
+  const truncatedContent =
+    content.length > MAX_CONTENT_LENGTH ? content.substring(0, MAX_CONTENT_LENGTH) + "..." : content;
+  const CONSISTENT_SUMMARY_PROMPT = `당신은 전문 한국어 요약 전문가입니다.\n\n규칙:\n1. 정확히 3-4문장으로 작성\n2. 핵심 사실과 중요한 정보만 포함\n3. 객관적이고 간결한 문체 사용\n4. 원문의 주요 결론이나 결과 포함\n\n형식: 각 문장은 완전한 한국어 문장으로 끝나야 하며, 불완전한 문장은 작성하지 마세요.`;
+  const messages: ChatCompletionMessageParam[] = [
+    { role: "system", content: CONSISTENT_SUMMARY_PROMPT },
+    { role: "user", content: `다음 텍스트를 요약해주세요:\n\n${truncatedContent}` },
+  ];
+  const engineInstance = await getOrInitEngine();
+  if (!engineInstance) throw new Error("엔진이 준비되지 않았습니다.");
+  let result = "";
+  const completion = await engineInstance.chat.completions.create({
+    stream: true,
+    messages,
+    extra_body: { enable_thinking: false },
+  });
+  for await (const chunk of completion) {
+    const curDelta = chunk.choices[0]?.delta?.content;
+    if (curDelta) result += curDelta;
+  }
+  return result;
+}
+
 // 메시지 통신 (데이터 관리만)
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   switch (message.type) {
@@ -192,8 +240,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: true });
       });
       break;
-  }
 
+    case "RELEASE_RESOURCES":
+      if (mlcHandler && typeof (mlcHandler as any).dispose === "function") {
+        (mlcHandler as any).dispose();
+        mlcHandler = undefined;
+        sendResponse({ success: true });
+      } else {
+        sendResponse({ success: false, error: "No handler or dispose not available" });
+      }
+      break;
+
+    case "SUMMARIZE":
+      (async () => {
+        try {
+          const summary = await summarizeWithEngine(message.content);
+          sendResponse({ summary });
+        } catch (e) {
+          sendResponse({ error: e instanceof Error ? e.message : String(e) });
+        }
+      })();
+      return true; // 비동기 응답
+  }
   return true; // 비동기 응답
 });
 
@@ -254,4 +322,11 @@ chrome.runtime.onConnect.addListener(function (port) {
     console.log("WebLLM handler port updated");
   }
   port.onMessage.addListener(mlcHandler.onmessage.bind(mlcHandler));
+  port.onDisconnect.addListener(() => {
+    if (mlcHandler && typeof (mlcHandler as any).dispose === "function") {
+      (mlcHandler as any).dispose();
+      mlcHandler = undefined;
+      console.log("WebLLM handler disposed on port disconnect");
+    }
+  });
 });

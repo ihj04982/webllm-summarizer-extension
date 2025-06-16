@@ -186,31 +186,13 @@ async function initializeUI() {
       return;
     }
 
-    // 웹워커 초기화 (사이드패널에서)
-    await initializeMLCEngine({
-      onProgress: (progress) => {
-        if (progressBar) progressBar.animate(progress, { duration: 50 });
-        const statusText = document.getElementById("model-status-text");
-        if (statusText) statusText.innerText = `모델 로딩 중... (${Math.round(progress * 100)}%)`;
-      },
-      onReady: () => {
-        hideLoadingState();
-        const statusText = document.getElementById("model-status-text");
-        if (statusText) statusText.innerText = "";
-      },
-      onError: (error) => {
-        hideLoadingState();
-        const statusText = document.getElementById("model-status-text");
-        if (statusText) statusText.innerText = "모델 로딩 실패";
-        showToast(`모델 초기화 실패: ${error}`, "error");
-      },
-    });
+    // (모델 로딩 UI는 서비스워커 상태에 따라 표시하도록 변경 필요)
+    // await initializeMLCEngine({ ... });
 
     // 히스토리 로드 (최대 MAX_HISTORY_ITEMS)
     await refreshLocalHistory(MAX_HISTORY_ITEMS);
 
     console.log("UI initialized successfully");
-    // 웹워커가 준비되면 자동으로 엔진 초기화됨
   } catch (error) {
     console.error("Failed to initialize UI:", error);
     hideLoadingState();
@@ -244,11 +226,11 @@ extractButton.addEventListener("click", async () => {
   updateUI("button", { loading: true }, extractButton, document.getElementById("loading-indicator")!);
   updateUI("loading", { show: true }, extractButton, document.getElementById("loading-indicator")!);
   try {
-    await initializeMLCEngine();
-    if (!getIsEngineReady()) {
-      alert("엔진이 아직 준비되지 않았습니다. 잠시 후 다시 시도해주세요.");
-      return;
-    }
+    // await initializeMLCEngine();
+    // if (!getIsEngineReady()) {
+    //   alert("엔진이 아직 준비되지 않았습니다. 잠시 후 다시 시도해주세요.");
+    //   return;
+    // }
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tabs[0]?.id) {
       throw new Error("활성 탭을 찾을 수 없습니다.");
@@ -301,26 +283,36 @@ async function startSummary(item) {
   // 상태 변경은 ServiceWorker에 먼저 반영
   await stateUpdateSummary(item.id, "", "in-progress", undefined, MAX_HISTORY_ITEMS);
   await refreshLocalHistory(MAX_HISTORY_ITEMS);
-  await initializeMLCEngine();
-  if (getIsEngineReady()) {
-    const requestId = nextRequestId();
-    await generateSummaryWithEngine(item.content, {
-      onPartial: (partial) => {
-        updateSummaryInPlace(item.id, partial);
-      },
-      onDone: async (final) => {
-        await finalizeSummary(item.id, final);
-      },
-      onError: async (error) => {
-        await handleSummaryError(item.id, error instanceof Error ? error.message : String(error));
-      },
-    });
-  }
+
+  // 서비스워커에 요약 요청 메시지 전송
+  chrome.runtime.sendMessage(
+    {
+      type: "SUMMARIZE",
+      content: item.content,
+      id: item.id,
+    },
+    async (response) => {
+      if (response && response.summary) {
+        await finalizeSummary(item.id, response.summary);
+      } else {
+        await handleSummaryError(item.id, response?.error || "요약 실패");
+      }
+    }
+  );
 }
 
 // 페이지 언로드 시 엔진/워커 정리
 window.addEventListener("beforeunload", () => {
+  // 기존 엔진/워커 정리
   cleanupMLCEngine();
+  // 서비스워커에 리소스 해제 요청
+  chrome.runtime.sendMessage({ type: "RELEASE_RESOURCES" }, (response) => {
+    if (response && response.success) {
+      console.log("Service worker resources released");
+    } else {
+      console.warn("Failed to release service worker resources", response?.error);
+    }
+  });
 });
 
 // 페이지 로드 시 초기화

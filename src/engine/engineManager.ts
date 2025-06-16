@@ -36,6 +36,13 @@ export function setEngineAndWorker(newEngine: MLCEngineInterface | null, newWork
 }
 
 export function cleanupMLCEngine() {
+  if (engine && typeof (engine as any).dispose === "function") {
+    try {
+      (engine as any).dispose();
+    } catch (e) {
+      console.warn("Engine dispose failed", e);
+    }
+  }
   if (worker) {
     try {
       worker.terminate();
@@ -55,7 +62,10 @@ export async function initializeMLCEngine(callbacks: EngineInitCallbacks = {}): 
   isInitializingMLCEngine = true;
   let readyCalled = false;
   try {
-    const selectedModel = "Qwen3-1.7B-q4f16_1-MLC";
+    // const selectedModel = "gemma-2-2b-it-q4f16_1-MLC";
+    // const selectedModel = "Qwen2.5-3B-Instruct-q4f16_1-MLC";
+    // const selectedModel = "Qwen3-4B-q4f16_1-MLC";
+    const selectedModel = "Qwen2.5-7B-Instruct-q4f16_1-MLC";
     if (worker) {
       try {
         worker.terminate();
@@ -92,6 +102,16 @@ type GenerateSummaryCallbacks = {
   onError?: (error: unknown) => void;
 };
 
+const CONSISTENT_SUMMARY_PROMPT = `당신은 전문 한국어 요약 전문가입니다.
+
+규칙:
+1. 정확히 3-4문장으로 작성
+2. 핵심 사실과 중요한 정보만 포함
+3. 객관적이고 간결한 문체 사용
+4. 원문의 주요 결론이나 결과 포함
+
+형식: 각 문장은 완전한 한국어 문장으로 끝나야 하며, 불완전한 문장은 작성하지 마세요.`;
+
 export async function generateSummaryWithEngine(content: string, callbacks: GenerateSummaryCallbacks = {}) {
   if (!engine) throw new Error("Engine not connected");
   const MAX_CONTENT_LENGTH = 3000;
@@ -101,26 +121,45 @@ export async function generateSummaryWithEngine(content: string, callbacks: Gene
     const messages: ChatCompletionMessageParam[] = [
       {
         role: "system",
-        content: `당신은 전문적인 한국어 요약 전문가입니다. 주어진 텍스트를 다음 규칙에 따라 요약해주세요:\n\n1. **언어**: 반드시 한국어로 작성\n2. **길이**: 3-4문장으로 간결하게 작성\n3. **구조**: \n   - 첫 문장: 주제/핵심 내용 소개\n   - 중간 문장들: 중요한 세부사항 2-3개\n   - 마지막 문장: 결론 또는 의미/영향\n4. **톤**: 객관적이고 정보 전달 중심\n5. **포함 요소**: \n   - 핵심 사실과 데이터\n   - 중요한 인물/기관명\n   - 주요 결과나 영향\n6. **제외 요소**: \n   - 불필요한 세부사항\n   - 반복적인 내용\n   - 개인적 의견이나 추측\n\n텍스트의 언어가 한국어가 아니더라도 반드시 한국어로 요약해야 합니다.`,
+        content: CONSISTENT_SUMMARY_PROMPT,
       },
       {
         role: "user",
-        content: `다음 텍스트를 위의 규칙에 따라 한국어로 요약해주세요:\n\n${truncatedContent}`,
+        content: `다음 텍스트를 요약해주세요:\n\n${truncatedContent}`,
       },
     ];
+    // ====== [테스트용] 성능 측정 코드 시작 ======
+    const startTime = performance.now();
+    // ====== [테스트용] 성능 측정 코드 끝 ======
     const completion = await engine.chat.completions.create({
       stream: true,
       messages,
       extra_body: { enable_thinking: false },
     });
     let result = "";
+    let lastUsage: any = undefined;
     for await (const chunk of completion) {
       const curDelta = chunk.choices[0]?.delta?.content;
       if (curDelta) {
         result += curDelta;
         if (callbacks.onPartial) callbacks.onPartial(result);
       }
+      if (chunk.usage) {
+        lastUsage = chunk.usage;
+      }
     }
+    // ====== [테스트용] 성능 측정 코드 시작 ======
+    const endTime = performance.now();
+    if (lastUsage) {
+      const usage = lastUsage;
+      console.log(`🚀 성능 리포트:`);
+      console.log(`📝 요약 길이: ${result.length}자`);
+      console.log(`🔢 효율성: ${((usage.completion_tokens / usage.prompt_tokens) * 100).toFixed(1)}% 압축률`);
+      console.log(`⚡ 체감 속도: ${((endTime - startTime) / 1000).toFixed(2)}초 (브라우저 측정)`);
+      if (usage.extra?.decode_tokens_per_s)
+        console.log(`⚡ 실제 속도: ${usage.extra.decode_tokens_per_s.toFixed(2)} 토큰/초`);
+    }
+    // ====== [테스트용] 성능 측정 코드 끝 ======
     if (callbacks.onDone) callbacks.onDone(result);
     return result;
   } catch (error) {
@@ -128,3 +167,23 @@ export async function generateSummaryWithEngine(content: string, callbacks: Gene
     throw error;
   }
 }
+
+// ====== [테스트용] 성능 모니터링 함수: generateWithMetrics ======
+// 이 함수는 테스트 후 삭제하세요.
+async function generateWithMetrics(content: string) {
+  if (!engine) throw new Error("Engine not connected");
+  const startTime = performance.now();
+  const completion = await engine.chat.completions.create({
+    messages: [{ role: "user", content }],
+    stream: false,
+  });
+  const endTime = performance.now();
+  const usage = completion.usage!;
+  console.log(`🚀 성능 리포트:`);
+  console.log(`📝 요약 길이: ${completion.choices[0].message.content?.length}자`);
+  console.log(`🔢 효율성: ${((usage.completion_tokens / usage.prompt_tokens) * 100).toFixed(1)}% 압축률`);
+  console.log(`⚡ 체감 속도: ${((endTime - startTime) / 1000).toFixed(2)}초 (브라우저 측정)`);
+  console.log(`⚡ 실제 속도: ${usage.extra.decode_tokens_per_s.toFixed(2)} 토큰/초`);
+  return completion;
+}
+// ====== [테스트용 끝] ======
