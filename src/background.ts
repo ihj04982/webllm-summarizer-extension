@@ -1,5 +1,9 @@
-import { ExtensionServiceWorkerMLCEngineHandler, CreateWebWorkerMLCEngine } from "@mlc-ai/web-llm";
-import type { MLCEngineInterface, ChatCompletionMessageParam } from "@mlc-ai/web-llm";
+import { ExtensionServiceWorkerMLCEngineHandler } from "@mlc-ai/web-llm";
+
+// ============================================================================
+// Extension Service Worker for WebLLM Summarizer
+// 역할: ExtensionServiceWorkerMLCEngineHandler + 데이터 관리 + 메시지 라우팅
+// ============================================================================
 
 // 서비스워커 중앙 데이터 관리
 interface SummaryItem {
@@ -111,20 +115,25 @@ class DataManager {
   }
 }
 
-// 전역 데이터 매니저
-const dataManager = new DataManager();
+// ============================================================================
+// 전역 변수 및 초기화
+// ============================================================================
 
-// 서비스워커 초기화
+const dataManager = new DataManager();
 let isInitialized = false;
 
 async function initializeServiceWorker() {
   if (!isInitialized) {
-    console.log("Initializing service worker (data management only)...");
+    console.log("Initializing service worker (Extension Service Worker for WebLLM)...");
     await dataManager.init();
     isInitialized = true;
-    console.log("Service worker initialized");
+    console.log("Service worker initialized - data management ready");
   }
 }
+
+// ============================================================================
+// 서비스워커 생명주기 이벤트
+// ============================================================================
 
 chrome.runtime.onStartup.addListener(async () => {
   await initializeServiceWorker();
@@ -137,54 +146,10 @@ chrome.runtime.onInstalled.addListener(async () => {
 // 즉시 초기화
 initializeServiceWorker().catch(console.error);
 
-// 서비스워커 전용 엔진 관리
-let engine: MLCEngineInterface | null = null;
-let isEngineReady = false;
-let isInitializingEngine = false;
+// ============================================================================
+// 데이터 관리 메시지 핸들러
+// ============================================================================
 
-async function getOrInitEngine() {
-  if (engine && isEngineReady) return engine;
-  if (isInitializingEngine) throw new Error("엔진 초기화 중입니다. 잠시 후 다시 시도해주세요.");
-  isInitializingEngine = true;
-  try {
-    const selectedModel = "Qwen2.5-7B-Instruct-q4f16_1-MLC";
-    engine = await CreateWebWorkerMLCEngine(null, selectedModel, {});
-    isEngineReady = true;
-    return engine;
-  } catch (e) {
-    engine = null;
-    isEngineReady = false;
-    throw e;
-  } finally {
-    isInitializingEngine = false;
-  }
-}
-
-async function summarizeWithEngine(content: string) {
-  const MAX_CONTENT_LENGTH = 3000;
-  const truncatedContent =
-    content.length > MAX_CONTENT_LENGTH ? content.substring(0, MAX_CONTENT_LENGTH) + "..." : content;
-  const CONSISTENT_SUMMARY_PROMPT = `당신은 전문 한국어 요약 전문가입니다.\n\n규칙:\n1. 정확히 3-4문장으로 작성\n2. 핵심 사실과 중요한 정보만 포함\n3. 객관적이고 간결한 문체 사용\n4. 원문의 주요 결론이나 결과 포함\n\n형식: 각 문장은 완전한 한국어 문장으로 끝나야 하며, 불완전한 문장은 작성하지 마세요.`;
-  const messages: ChatCompletionMessageParam[] = [
-    { role: "system", content: CONSISTENT_SUMMARY_PROMPT },
-    { role: "user", content: `다음 텍스트를 요약해주세요:\n\n${truncatedContent}` },
-  ];
-  const engineInstance = await getOrInitEngine();
-  if (!engineInstance) throw new Error("엔진이 준비되지 않았습니다.");
-  let result = "";
-  const completion = await engineInstance.chat.completions.create({
-    stream: true,
-    messages,
-    extra_body: { enable_thinking: false },
-  });
-  for await (const chunk of completion) {
-    const curDelta = chunk.choices[0]?.delta?.content;
-    if (curDelta) result += curDelta;
-  }
-  return result;
-}
-
-// 메시지 통신 (데이터 관리만)
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   switch (message.type) {
     case "PING":
@@ -242,30 +207,39 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       break;
 
     case "RELEASE_RESOURCES":
+      // ExtensionServiceWorkerMLCEngineHandler 정리
       if (mlcHandler && typeof (mlcHandler as any).dispose === "function") {
-        (mlcHandler as any).dispose();
-        mlcHandler = undefined;
-        sendResponse({ success: true });
+        try {
+          (mlcHandler as any).dispose();
+          mlcHandler = undefined;
+          console.log("WebLLM handler disposed successfully");
+          sendResponse({ success: true });
+        } catch (error) {
+          console.error("Error disposing WebLLM handler:", error);
+          sendResponse({ success: false, error: (error as Error).message });
+        }
       } else {
-        sendResponse({ success: false, error: "No handler or dispose not available" });
+        sendResponse({ success: false, error: "No handler available to dispose" });
       }
       break;
 
-    case "SUMMARIZE":
-      (async () => {
-        try {
-          const summary = await summarizeWithEngine(message.content);
-          sendResponse({ summary });
-        } catch (e) {
-          sendResponse({ error: e instanceof Error ? e.message : String(e) });
-        }
-      })();
-      return true; // 비동기 응답
+    case "MODEL_LOAD_PROGRESS":
+      chrome.runtime.sendMessage({ type: "MODEL_LOAD_PROGRESS", progress: message.progress });
+      sendResponse({ success: true });
+      break;
+
+    default:
+      console.warn("Unknown message type:", message.type);
+      sendResponse({ success: false, error: "Unknown message type" });
+      break;
   }
-  return true; // 비동기 응답
+  return true; // 비동기 응답 유지
 });
 
-// 해시 생성 함수
+// ============================================================================
+// 유틸리티 함수
+// ============================================================================
+
 function generateHash(content: string): string {
   let hash = 0;
   for (let i = 0; i < content.length; i++) {
@@ -276,14 +250,13 @@ function generateHash(content: string): string {
   return hash.toString();
 }
 
-// 브로드캐스트 함수
 async function broadcastToSidePanels(message: any) {
   try {
     const tabs = await chrome.tabs.query({});
     tabs.forEach((tab) => {
       if (tab.id) {
         chrome.tabs.sendMessage(tab.id, message).catch(() => {
-          // 사이드패널이 없는 탭은 무시
+          // 사이드패널이 없는 탭은 무시 (정상적인 동작)
         });
       }
     });
@@ -292,7 +265,11 @@ async function broadcastToSidePanels(message: any) {
   }
 }
 
-// 주기적 정리
+// ============================================================================
+// 주기적 정리 및 확장 프로그램 액션
+// ============================================================================
+
+// 주기적 데이터 정리 (1시간마다)
 setInterval(() => {
   dataManager.cleanup();
 }, 60 * 60 * 1000);
@@ -308,25 +285,35 @@ chrome.action.onClicked.addListener((tab: chrome.tabs.Tab) => {
   }
 });
 
+// ============================================================================
 // WebLLM Extension Service Worker Handler
+// 핵심: 엔진 연산은 여기서 하지 않음. 단순히 핸들러만 관리.
+// ============================================================================
+
 let mlcHandler: ExtensionServiceWorkerMLCEngineHandler | undefined;
 
-// WebLLM 포트 연결 처리
 chrome.runtime.onConnect.addListener(function (port) {
   console.assert(port.name === "web_llm_service_worker");
+
   if (mlcHandler === undefined) {
     mlcHandler = new ExtensionServiceWorkerMLCEngineHandler(port);
-    console.log("WebLLM handler created");
+    console.log("WebLLM Extension Service Worker handler created");
   } else {
     mlcHandler.setPort(port);
     console.log("WebLLM handler port updated");
   }
+
   port.onMessage.addListener(mlcHandler.onmessage.bind(mlcHandler));
+
   port.onDisconnect.addListener(() => {
     if (mlcHandler && typeof (mlcHandler as any).dispose === "function") {
-      (mlcHandler as any).dispose();
-      mlcHandler = undefined;
-      console.log("WebLLM handler disposed on port disconnect");
+      try {
+        (mlcHandler as any).dispose();
+        mlcHandler = undefined;
+        console.log("WebLLM handler disposed on port disconnect");
+      } catch (error) {
+        console.error("Error disposing handler on disconnect:", error);
+      }
     }
   });
 });

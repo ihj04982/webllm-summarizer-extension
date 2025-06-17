@@ -1,24 +1,8 @@
 import "./styles";
-import {
-  CreateWebWorkerMLCEngine,
-  MLCEngineInterface,
-  InitProgressReport,
-  ChatCompletionMessageParam,
-} from "@mlc-ai/web-llm";
 import { Line } from "progressbar.js";
-import {
-  initializeMLCEngine,
-  cleanupMLCEngine,
-  generateSummaryWithEngine,
-  getIsEngineReady,
-  getIsInitializingMLCEngine,
-  setEngineAndWorker,
-  getEngine,
-  getWorker,
-} from "./engine/engineManager";
+import { initializeMLCEngine, generateSummaryWithEngine } from "./engine/engineManager";
 import {
   getLocalHistory,
-  nextRequestId,
   refreshLocalHistory,
   addSummaryItem,
   updateSummary as stateUpdateSummary,
@@ -28,21 +12,18 @@ import {
 } from "./state/state";
 import { renderHistory, updateUI, showToast } from "./ui/render";
 import { setupCardEventListeners } from "./ui/events";
-import { ServiceWorkerAPI } from "./sw/serviceWorkerAPI";
-import { SummaryStatus, SummaryItem } from "./types";
 
-const extractButton = document.getElementById("extract-button")!;
+const extractButton = document.getElementById("extract-button") as HTMLButtonElement;
 const historyWrapper = document.getElementById("historyWrapper")!;
 const loadingContainerWrapper = document.getElementById("loadingContainerWrapper")!;
 
 let progressBar: InstanceType<typeof Line> | null = null;
 
-// WebLLM Engine 및 Worker 참조
-let isEngineReady = false;
-let isInitializingMLCEngine = false;
-
 // ServiceWorker 정책과 동기화된 히스토리 최대 개수
 const MAX_HISTORY_ITEMS = 20;
+
+// 요약 버튼은 초기에는 비활성화
+extractButton.disabled = true;
 
 // 해시 생성 함수
 function generateHash(content: string): string {
@@ -57,6 +38,30 @@ function generateHash(content: string): string {
 
 // 서비스워커에서 오는 메시지 리스너
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === "MODEL_LOAD_PROGRESS") {
+    if (progressBar) {
+      progressBar.set(message.progress);
+    }
+    // 상태 텍스트 업데이트
+    const statusText = document.getElementById("model-status-text");
+    if (statusText) {
+      if (message.progress >= 1.0) {
+        statusText.textContent = "모델 준비 완료!";
+      } else {
+        const percent = Math.round(message.progress * 100);
+        statusText.textContent = `모델 준비 중... (${percent}%)`;
+      }
+    }
+    if (message.progress >= 1.0) {
+      extractButton.disabled = false;
+      setTimeout(() => {
+        hideLoadingState();
+      }, 200);
+    } else {
+      extractButton.disabled = true;
+      showLoadingState();
+    }
+  }
   switch (message.type) {
     case "HISTORY_UPDATED":
       refreshLocalHistory(MAX_HISTORY_ITEMS);
@@ -186,8 +191,7 @@ async function initializeUI() {
       return;
     }
 
-    // (모델 로딩 UI는 서비스워커 상태에 따라 표시하도록 변경 필요)
-    // await initializeMLCEngine({ ... });
+    await initializeMLCEngine();
 
     // 히스토리 로드 (최대 MAX_HISTORY_ITEMS)
     await refreshLocalHistory(MAX_HISTORY_ITEMS);
@@ -201,6 +205,8 @@ async function initializeUI() {
 
 // 로딩 상태 함수
 function showLoadingState() {
+  if (document.getElementById("initial-loading")) return;
+
   const loadingDiv = document.createElement("div");
   loadingDiv.id = "initial-loading";
   loadingDiv.innerHTML = `
@@ -226,25 +232,37 @@ extractButton.addEventListener("click", async () => {
   updateUI("button", { loading: true }, extractButton, document.getElementById("loading-indicator")!);
   updateUI("loading", { show: true }, extractButton, document.getElementById("loading-indicator")!);
   try {
-    // await initializeMLCEngine();
-    // if (!getIsEngineReady()) {
-    //   alert("엔진이 아직 준비되지 않았습니다. 잠시 후 다시 시도해주세요.");
-    //   return;
-    // }
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tabs[0]?.id) {
       throw new Error("활성 탭을 찾을 수 없습니다.");
     }
     await chrome.scripting.executeScript({
-      target: { tabId: tabs[0].id },
       files: ["content.js"],
+      target: { tabId: tabs[0].id! },
     });
-    const response: any = await new Promise((resolve) => {
-      chrome.tabs.sendMessage(tabs[0].id!, { type: "EXTRACT_MAIN_CONTENT" }, resolve);
+
+    const response: any = await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error("본문 추출 시간이 초과되었습니다 (10초)"));
+      }, 10000);
+
+      chrome.tabs.sendMessage(tabs[0].id!, { type: "EXTRACT_MAIN_CONTENT" }, (response) => {
+        clearTimeout(timeout);
+
+        if (chrome.runtime.lastError) {
+          reject(new Error(`통신 오류: ${chrome.runtime.lastError.message}`));
+          return;
+        }
+
+        if (!response) {
+          reject(new Error("응답을 받지 못했습니다"));
+          return;
+        }
+
+        resolve(response);
+      });
     });
-    if (!response?.content) {
-      throw new Error("본문 추출에 실패했습니다.");
-    }
+
     const { content, title } = response;
     const currentUrl = tabs[0].url || "";
     const timestamp = new Date().toLocaleString("en-US", {
@@ -284,27 +302,31 @@ async function startSummary(item) {
   await stateUpdateSummary(item.id, "", "in-progress", undefined, MAX_HISTORY_ITEMS);
   await refreshLocalHistory(MAX_HISTORY_ITEMS);
 
-  // 서비스워커에 요약 요청 메시지 전송
-  chrome.runtime.sendMessage(
-    {
-      type: "SUMMARIZE",
-      content: item.content,
-      id: item.id,
-    },
-    async (response) => {
-      if (response && response.summary) {
-        await finalizeSummary(item.id, response.summary);
-      } else {
-        await handleSummaryError(item.id, response?.error || "요약 실패");
-      }
-    }
-  );
+  // generateSummaryWithEngine을 직접 호출, 콜백으로 진행률/완료/에러 처리
+  try {
+    await initializeMLCEngine();
+    let partial = "";
+    await generateSummaryWithEngine(item.content, {
+      onPartial: (partialSummary) => {
+        partial = partialSummary;
+        updateSummaryInPlace(item.id, partialSummary);
+      },
+      onDone: async (finalSummary) => {
+        await finalizeSummary(item.id, finalSummary);
+      },
+      onError: async (error) => {
+        await handleSummaryError(item.id, error instanceof Error ? error.message : String(error));
+      },
+    });
+  } catch (error) {
+    await handleSummaryError(item.id, error instanceof Error ? error.message : String(error));
+  }
 }
 
 // 페이지 언로드 시 엔진/워커 정리
 window.addEventListener("beforeunload", () => {
   // 기존 엔진/워커 정리
-  cleanupMLCEngine();
+  // cleanupMLCEngine();
   // 서비스워커에 리소스 해제 요청
   chrome.runtime.sendMessage({ type: "RELEASE_RESOURCES" }, (response) => {
     if (response && response.success) {

@@ -12,7 +12,6 @@ interface ChromeMessage {
 }
 
 function extractMainContent(): ExtractedContent {
-  // Minimal: just use Readability on a cloned document
   const doc = document.implementation.createHTMLDocument();
   doc.body.innerHTML = document.body.innerHTML;
   const reader = new Readability(doc);
@@ -38,7 +37,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       });
     }
   }
-  return false; // 동기 응답
+  return false;
 });
 
 console.log("WebLLM Summarizer content script loaded (MINIMAL)");

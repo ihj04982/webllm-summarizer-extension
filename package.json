@@ -4,12 +4,13 @@
   "description": "",
   "private": true,
   "scripts": {
-    "build": "parcel build src/manifest.json src/content.ts --config @parcel/config-webextension --no-content-hash"
+    "build": "parcel build src/background.ts src/content.ts src/sidepanel.html && powershell Copy-Item src\\manifest.json dist\\manifest.json; Copy-Item -Recurse -Force src\\icons dist\\icons"
   },
   "author": "",
   "license": "ISC",
   "devDependencies": {
     "@parcel/config-webextension": "^2.9.3",
+    "@parcel/optimizer-terser": "^2.15.2",
     "@types/chrome": "^0.0.242",
     "@types/progressbar.js": "^1.1.7",
     "buffer": "^6.0.3",
@@ -21,6 +22,7 @@
     "@mlc-ai/web-llm": "^0.2.79",
     "@mozilla/readability": "^0.4.4",
     "@types/styled-components": "^5.1.34",
+    "parcel-namer-hashless": "^1.0.7",
     "progressbar.js": "^1.1.0",
     "styled-components": "^6.1.18"
   }
