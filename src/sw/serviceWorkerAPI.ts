@@ -1,26 +1,40 @@
 export class ServiceWorkerAPI {
   private static async sendMessage(message: any): Promise<any> {
-    return new Promise((resolve, reject) => {
+    let attempt = 0;
+    const maxAttempts = 2;
+    while (attempt < maxAttempts) {
       try {
-        chrome.runtime.sendMessage(message, (response) => {
-          if (chrome.runtime.lastError) {
-            console.error("Chrome runtime error:", chrome.runtime.lastError);
-            reject(new Error(chrome.runtime.lastError.message));
-            return;
-          }
-
-          if (!response) {
-            console.warn("No response from service worker for:", message.type);
-            resolve({});
-            return;
-          }
-
-          resolve(response);
+        return await new Promise((resolve, reject) => {
+          chrome.runtime.sendMessage(message, (response) => {
+            if (chrome.runtime.lastError) {
+              if (attempt + 1 < maxAttempts) {
+                attempt++;
+                setTimeout(() => {
+                  // 재시도
+                  this.sendMessage(message).then(resolve).catch(reject);
+                }, 200);
+                return;
+              }
+              console.error("Chrome runtime error:", chrome.runtime.lastError);
+              reject(new Error(chrome.runtime.lastError.message));
+              return;
+            }
+            if (!response) {
+              console.warn("No response from service worker for:", message.type);
+              resolve({});
+              return;
+            }
+            resolve(response);
+          });
         });
       } catch (error) {
-        reject(error);
+        if (attempt + 1 < maxAttempts) {
+          attempt++;
+          continue;
+        }
+        throw error;
       }
-    });
+    }
   }
 
   static async getHistory(limit?: number): Promise<any[]> {

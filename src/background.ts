@@ -1,4 +1,5 @@
 import { ExtensionServiceWorkerMLCEngineHandler } from "@mlc-ai/web-llm";
+import { unloadEngine } from "./engine/engineManager";
 
 // ============================================================================
 // Extension Service Worker for WebLLM Summarizer
@@ -207,19 +208,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       break;
 
     case "RELEASE_RESOURCES":
-      // ExtensionServiceWorkerMLCEngineHandler 정리
-      if (mlcHandler && typeof (mlcHandler as any).dispose === "function") {
-        try {
+      try {
+        if (mlcHandler && typeof (mlcHandler as any).dispose === "function") {
           (mlcHandler as any).dispose();
-          mlcHandler = undefined;
           console.log("WebLLM handler disposed successfully");
-          sendResponse({ success: true });
-        } catch (error) {
-          console.error("Error disposing WebLLM handler:", error);
-          sendResponse({ success: false, error: (error as Error).message });
         }
-      } else {
-        sendResponse({ success: false, error: "No handler available to dispose" });
+        // 엔진도 정리
+        unloadEngine().catch(console.error);
+        sendResponse({ success: true });
+      } catch (error) {
+        console.error("Error disposing WebLLM handler:", error);
+        sendResponse({ success: false, error: (error as Error).message });
+      } finally {
+        mlcHandler = undefined;
       }
       break;
 
@@ -305,15 +306,17 @@ chrome.runtime.onConnect.addListener(function (port) {
 
   port.onMessage.addListener(mlcHandler.onmessage.bind(mlcHandler));
 
-  port.onDisconnect.addListener(() => {
-    if (mlcHandler && typeof (mlcHandler as any).dispose === "function") {
-      try {
+  port.onDisconnect.addListener(async () => {
+    try {
+      if (mlcHandler && typeof (mlcHandler as any).dispose === "function") {
         (mlcHandler as any).dispose();
-        mlcHandler = undefined;
-        console.log("WebLLM handler disposed on port disconnect");
-      } catch (error) {
-        console.error("Error disposing handler on disconnect:", error);
       }
+      // 엔진도 정리
+      await unloadEngine();
+    } catch (error) {
+      console.error("Error disposing handler on disconnect:", error);
+    } finally {
+      mlcHandler = undefined;
     }
   });
 });
