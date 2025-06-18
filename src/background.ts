@@ -283,6 +283,10 @@ chrome.runtime.onConnect.addListener(function (port) {
 
   port.onDisconnect.addListener(async () => {
     try {
+      const inProgressItems = dataManager.getHistory().filter((item) => item.status === "in-progress");
+      for (const item of inProgressItems) {
+        await dataManager.updateSummary(item.id, item.summary, "error", "요약 중 에러 발생");
+      }
       if (mlcHandler && typeof (mlcHandler as unknown as { dispose?: () => void }).dispose === "function") {
         (mlcHandler as unknown as { dispose: () => void }).dispose();
       }

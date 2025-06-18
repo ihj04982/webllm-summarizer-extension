@@ -1,13 +1,10 @@
-// Create a style element
 const styleElement = document.createElement("style");
 document.head.appendChild(styleElement);
 
-// Function to add styles
 const addStyles = (styles: string) => {
   styleElement.textContent += styles;
 };
 
-// Add all styles
 addStyles(`
   :root {
     /* 색상 팔레트 */
@@ -39,12 +36,27 @@ addStyles(`
     --radius-lg: 12px;
   }
 
+  html, body {
+    overflow-y: auto;
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE, Edge */
+  }
+  html::-webkit-scrollbar, body::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, Opera */
+  }
+
   body {
     background: var(--bg-primary);
     color: var(--text-primary);
     font-family: var(--font-primary);
     font-size: var(--text-base);
     margin: 0;
+    /* 스크롤바 숨김 */
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE, Edge */
+  }
+  body::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, Opera */
   }
 
   #loadingContainerWrapper {
@@ -150,6 +162,12 @@ addStyles(`
 
   #historyWrapper {
     padding: var(--space-lg);
+    /* 스크롤바 숨김 */
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  #historyWrapper::-webkit-scrollbar {
+    display: none;
   }
 
   .history-card {
@@ -321,7 +339,7 @@ addStyles(`
 
   @media (max-width: 400px) {
     .history-card {
-      min-width: 320px;
+      min-width: 250px;
     }
   }
 `);

@@ -28,7 +28,8 @@ export function setupCardEventListeners(
 
   const deleteBtn = card.querySelector<HTMLButtonElement>(".delete-button");
   if (deleteBtn) {
-    deleteBtn.addEventListener("click", async () => {
+    deleteBtn.addEventListener("click", async (e) => {
+      if (deleteBtn.disabled) return;
       onDelete(item);
     });
   }
@@ -36,7 +37,37 @@ export function setupCardEventListeners(
   const retryBtn = card.querySelector<HTMLButtonElement>(".retry-button");
   if (retryBtn && item.status !== "in-progress") {
     retryBtn.addEventListener("click", async () => {
+      if (retryBtn.disabled) return;
       onRetry(item);
     });
   }
+}
+
+interface AppEventHandlers {
+  onExtract: () => void;
+  onDelete: (item: SummaryItem) => void;
+  onRetry: (item: SummaryItem) => void;
+  onModelLoadProgress?: (progress: number) => void;
+  onHistoryChanged?: () => void;
+}
+
+export function bindAppEvents(handlers: AppEventHandlers) {
+  const extractButton = document.getElementById("extract-button") as HTMLButtonElement;
+  if (extractButton) {
+    extractButton.addEventListener("click", handlers.onExtract);
+  }
+
+  window.addEventListener("beforeunload", () => {
+    chrome.runtime.sendMessage({ type: "RELEASE_RESOURCES" }, (response) => {});
+  });
+
+  document.addEventListener("DOMContentLoaded", () => {
+    if (handlers.onHistoryChanged) handlers.onHistoryChanged();
+  });
+
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === "MODEL_LOAD_PROGRESS" && handlers.onModelLoadProgress) {
+      handlers.onModelLoadProgress(message.progress);
+    }
+  });
 }
