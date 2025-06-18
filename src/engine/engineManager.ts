@@ -5,9 +5,6 @@ import { CreateExtensionServiceWorkerMLCEngine } from "@mlc-ai/web-llm";
 let engine: MLCEngineInterface | null = null;
 
 function isEngineAlive(): boolean {
-  // 엔진이 null이 아니고, 내부적으로 dispose 상태가 아니라고 가정 (MLCEngineInterface에 isConnected/isAlive가 있으면 사용)
-  // 실제로는 엔진 객체에 연결 상태 확인 메서드가 있으면 활용
-  // 없으면 try-catch로 에러 발생 시 dispose
   return !!engine;
 }
 
@@ -24,18 +21,15 @@ export async function unloadEngine(): Promise<void> {
 
 export async function initializeMLCEngine(): Promise<void> {
   if (isEngineAlive()) {
-    console.log("[engineManager] 엔진 이미 초기화됨");
     return;
   }
-  const selectedModel = "Qwen3-1.7B-q4f16_1-MLC";
-  console.log("[engineManager] 엔진 생성 시작");
+
+  const selectedModel = "Qwen3-4B-q4f16_1-MLC";
   engine = await CreateExtensionServiceWorkerMLCEngine(selectedModel, {
     initProgressCallback: (report: { progress: number }) => {
-      console.log("[engineManager] 모델 로드 진행률", report);
       chrome.runtime.sendMessage({ type: "MODEL_LOAD_PROGRESS", progress: report.progress });
     },
   });
-  console.log("[engineManager] 엔진 생성 완료", engine);
 }
 
 export function getEngine(): MLCEngineInterface | null {
@@ -89,9 +83,7 @@ export async function generateSummaryWithEngine(
       console.log("[engineManager] 요약 최종 결과", result);
       return result;
     } catch (error: any) {
-      // GPU 에러 또는 치명적 에러 발생 시 unload
       await unloadEngine();
-      // GPU 관련 에러 메시지 예시: "GPU", "WebGPU", "out of memory", "device lost" 등 포함 시
       const errMsg = (error?.message || "") as string;
       if (!retry && /gpu|webgpu|memory|device lost|out of memory/i.test(errMsg)) {
         retry = true;

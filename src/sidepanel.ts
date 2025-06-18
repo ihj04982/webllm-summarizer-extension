@@ -46,20 +46,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const statusText = document.getElementById("model-status-text");
     if (statusText) {
       if (message.progress >= 1.0) {
-        statusText.textContent = "모델 준비 완료!";
+        statusText.textContent = "AI 모델 준비 완료!";
       } else {
         const percent = Math.round(message.progress * 100);
-        statusText.textContent = `모델 준비 중... (${percent}%)`;
+        statusText.textContent = `AI 모델 다운로드 중... (${percent}%)`;
       }
     }
     if (message.progress >= 1.0) {
       extractButton.disabled = false;
-      setTimeout(() => {
-        hideLoadingState();
-      }, 200);
     } else {
       extractButton.disabled = true;
-      showLoadingState();
     }
   }
   switch (message.type) {
@@ -134,13 +130,13 @@ function updateSummaryInPlace(itemId: string, partialSummary: string) {
 // 요약 완료 처리
 async function finalizeSummary(itemId: string, finalSummary: string) {
   // 상태 변경은 ServiceWorker에 먼저 반영
-  await stateUpdateSummary(itemId, finalSummary, "done", undefined, MAX_HISTORY_ITEMS);
+  const cleanedSummary = cleanThinkTags(finalSummary);
+  await stateUpdateSummary(itemId, cleanedSummary, "done", undefined, MAX_HISTORY_ITEMS);
   await refreshLocalHistory(MAX_HISTORY_ITEMS);
 }
 
 // 요약 에러 처리
 async function handleSummaryError(itemId: string, error: string) {
-  // 상태 변경은 ServiceWorker에 먼저 반영
   await stateUpdateSummary(itemId, `요약 중 오류가 발생했습니다: ${error}`, "error", error, MAX_HISTORY_ITEMS);
   await refreshLocalHistory(MAX_HISTORY_ITEMS);
 }
@@ -153,7 +149,6 @@ async function waitForServiceWorker(): Promise<boolean> {
 
     const checkServiceWorker = () => {
       attempts++;
-      console.log(`Service worker ping attempt ${attempts}/${maxAttempts}`);
 
       chrome.runtime.sendMessage({ type: "PING" }, (response) => {
         if (chrome.runtime.lastError) {
@@ -163,11 +158,10 @@ async function waitForServiceWorker(): Promise<boolean> {
             setTimeout(checkServiceWorker, 1000);
           } else {
             console.error("Service worker not responding after", maxAttempts, "attempts");
-            showToast("서비스워커 연결 실패. 확장 프로그램을 다시 로드해주세요.", "error");
+            showToast("서버 연결 실패. 확장 프로그램을 다시 로드해주세요.", "error");
             resolve(false);
           }
         } else {
-          console.log(`Service worker responded successfully on attempt ${attempts}`);
           resolve(true);
         }
       });
@@ -180,50 +174,15 @@ async function waitForServiceWorker(): Promise<boolean> {
 // 초기화 함수
 async function initializeUI() {
   try {
-    // 로딩 상태 표시
-    showLoadingState();
-
-    // 서비스워커 준비 대기
     const isReady = await waitForServiceWorker();
     if (!isReady) {
-      console.warn("Service worker not ready");
-      hideLoadingState();
       return;
     }
 
     await initializeMLCEngine();
-
-    // 히스토리 로드 (최대 MAX_HISTORY_ITEMS)
     await refreshLocalHistory(MAX_HISTORY_ITEMS);
-
-    console.log("UI initialized successfully");
   } catch (error) {
     console.error("Failed to initialize UI:", error);
-    hideLoadingState();
-  }
-}
-
-// 로딩 상태 함수
-function showLoadingState() {
-  if (document.getElementById("initial-loading")) return;
-
-  const loadingDiv = document.createElement("div");
-  loadingDiv.id = "initial-loading";
-  loadingDiv.innerHTML = `
-    <div style="text-align: center; padding: 20px; color: #666;">
-      <div>시스템 초기화 중...</div>
-    </div>
-  `;
-  historyWrapper.appendChild(loadingDiv);
-}
-
-function hideLoadingState() {
-  const loadingDiv = document.getElementById("initial-loading");
-  if (loadingDiv) {
-    loadingDiv.remove();
-  }
-  if (loadingContainerWrapper) {
-    loadingContainerWrapper.style.display = "none";
   }
 }
 
@@ -325,14 +284,9 @@ async function startSummary(item) {
 
 // 페이지 언로드 시 엔진/워커 정리
 window.addEventListener("beforeunload", () => {
-  // 기존 엔진/워커 정리
-  // cleanupMLCEngine();
-  // 서비스워커에 리소스 해제 요청
   chrome.runtime.sendMessage({ type: "RELEASE_RESOURCES" }, (response) => {
     if (response && response.success) {
-      console.log("Service worker resources released");
     } else {
-      console.warn("Failed to release service worker resources", response?.error);
     }
   });
 });
@@ -356,7 +310,6 @@ document.addEventListener("DOMContentLoaded", () => {
     console.error("Failed to initialize ProgressBar:", e);
   }
   initializeUI().then(async () => {
-    // On panel open, mark any in-progress summaries as interrupted
     let needsUpdate = false;
     for (const item of getLocalHistory()) {
       if (item.status === "in-progress") {
@@ -409,32 +362,6 @@ async function handleDeleteSummary(item) {
       alert("삭제 중 오류가 발생했습니다.");
     }
   }
-}
-
-// Think tag buffer and cleaning helpers (function style)
-export function createThinkTagBuffer(bufferSize = 20) {
-  return {
-    buffer: "",
-    bufferSize,
-    result: "",
-  };
-}
-
-export function pushThinkTagBuffer(bufObj, chunk) {
-  let data = bufObj.buffer + chunk;
-  data = data.replace(/(<think>|<\/think>)[\r\n]*/g, "");
-  data = data.replace(/^[\r\n]+/, "");
-  bufObj.buffer = data.slice(-bufObj.bufferSize);
-  bufObj.result += data.slice(0, -bufObj.bufferSize);
-  return bufObj.result;
-}
-
-export function flushThinkTagBuffer(bufObj) {
-  let data = bufObj.buffer.replace(/(<think>|<\/think>)[\r\n]*/g, "");
-  data = data.replace(/^[\r\n]+/, "");
-  bufObj.result += data;
-  bufObj.buffer = "";
-  return bufObj.result;
 }
 
 export function cleanThinkTags(str) {

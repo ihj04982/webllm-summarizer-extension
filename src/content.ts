@@ -23,21 +23,22 @@ function extractMainContent(): ExtractedContent {
 }
 
 // 메시지 리스너
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.type === "EXTRACT_MAIN_CONTENT") {
-    try {
-      const result = extractMainContent();
-      sendResponse(result);
-    } catch (error) {
-      console.error("Error in message handler:", error);
-      sendResponse({
-        content: "",
-        title: document.title || "Untitled",
-        error: error instanceof Error ? error.message : "Unknown error",
-      });
+if (!(window as any).__webllm_content_listener_registered) {
+  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.type === "EXTRACT_MAIN_CONTENT") {
+      try {
+        const result = extractMainContent();
+        sendResponse(result);
+      } catch (error) {
+        console.error("Error in message handler:", error);
+        sendResponse({
+          content: "",
+          title: document.title || "Untitled",
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
+      }
     }
-  }
-  return false;
-});
-
-console.log("WebLLM Summarizer content script loaded (MINIMAL)");
+    return false;
+  });
+  (window as any).__webllm_content_listener_registered = true;
+}

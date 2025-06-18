@@ -5,8 +5,6 @@ import { ServiceWorkerAPI } from "../sw/serviceWorkerAPI";
 let localHistory: (SummaryItem & { partialSummary?: string })[] = [];
 let currentRequestId = 0;
 let activeSummaryRequests = new Map<string, SummaryItem>();
-
-// 상태 변경 콜백
 let onHistoryChanged: (() => void) | null = null;
 
 export function getLocalHistory() {

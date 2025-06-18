@@ -125,10 +125,8 @@ let isInitialized = false;
 
 async function initializeServiceWorker() {
   if (!isInitialized) {
-    console.log("Initializing service worker (Extension Service Worker for WebLLM)...");
     await dataManager.init();
     isInitialized = true;
-    console.log("Service worker initialized - data management ready");
   }
 }
 
@@ -211,9 +209,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       try {
         if (mlcHandler && typeof (mlcHandler as any).dispose === "function") {
           (mlcHandler as any).dispose();
-          console.log("WebLLM handler disposed successfully");
         }
-        // 엔진도 정리
         unloadEngine().catch(console.error);
         sendResponse({ success: true });
       } catch (error) {
@@ -234,7 +230,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ success: false, error: "Unknown message type" });
       break;
   }
-  return true; // 비동기 응답 유지
+  return true;
 });
 
 // ============================================================================
@@ -266,10 +262,6 @@ async function broadcastToSidePanels(message: any) {
   }
 }
 
-// ============================================================================
-// 주기적 정리 및 확장 프로그램 액션
-// ============================================================================
-
 // 주기적 데이터 정리 (1시간마다)
 setInterval(() => {
   dataManager.cleanup();
@@ -286,11 +278,6 @@ chrome.action.onClicked.addListener((tab: chrome.tabs.Tab) => {
   }
 });
 
-// ============================================================================
-// WebLLM Extension Service Worker Handler
-// 핵심: 엔진 연산은 여기서 하지 않음. 단순히 핸들러만 관리.
-// ============================================================================
-
 let mlcHandler: ExtensionServiceWorkerMLCEngineHandler | undefined;
 
 chrome.runtime.onConnect.addListener(function (port) {
@@ -298,10 +285,8 @@ chrome.runtime.onConnect.addListener(function (port) {
 
   if (mlcHandler === undefined) {
     mlcHandler = new ExtensionServiceWorkerMLCEngineHandler(port);
-    console.log("WebLLM Extension Service Worker handler created");
   } else {
     mlcHandler.setPort(port);
-    console.log("WebLLM handler port updated");
   }
 
   port.onMessage.addListener(mlcHandler.onmessage.bind(mlcHandler));
@@ -311,7 +296,6 @@ chrome.runtime.onConnect.addListener(function (port) {
       if (mlcHandler && typeof (mlcHandler as any).dispose === "function") {
         (mlcHandler as any).dispose();
       }
-      // 엔진도 정리
       await unloadEngine();
     } catch (error) {
       console.error("Error disposing handler on disconnect:", error);
