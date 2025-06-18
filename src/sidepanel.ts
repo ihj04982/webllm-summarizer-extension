@@ -12,6 +12,13 @@ import {
 } from "./state/state";
 import { renderHistory, updateUI, showToast } from "./ui/render";
 import { setupCardEventListeners } from "./ui/events";
+import type { SummaryItem } from "./types";
+
+interface ExtractedContent {
+  content: string;
+  title: string;
+  error?: string;
+}
 
 const extractButton = document.getElementById("extract-button") as HTMLButtonElement;
 const historyWrapper = document.getElementById("historyWrapper")!;
@@ -22,18 +29,16 @@ let progressBar: InstanceType<typeof Line> | null = null;
 // ServiceWorker 정책과 동기화된 히스토리 최대 개수
 const MAX_HISTORY_ITEMS = 20;
 
-// 요약 버튼은 초기에는 비활성화
 extractButton.disabled = true;
 
-// 해시 생성 함수
-function generateHash(content: string): string {
-  let hash = 0;
-  for (let i = 0; i < content.length; i++) {
-    const char = content.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash = hash & hash;
+function hideLoadingState() {
+  const loadingDiv = document.getElementById("initial-loading");
+  if (loadingDiv) {
+    loadingDiv.remove();
   }
-  return hash.toString();
+  if (loadingContainerWrapper) {
+    loadingContainerWrapper.style.display = "none";
+  }
 }
 
 // 서비스워커에서 오는 메시지 리스너
@@ -47,6 +52,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (statusText) {
       if (message.progress >= 1.0) {
         statusText.textContent = "AI 모델 준비 완료!";
+        hideLoadingState();
       } else {
         const percent = Math.round(message.progress * 100);
         statusText.textContent = `AI 모델 다운로드 중... (${percent}%)`;
@@ -200,7 +206,7 @@ extractButton.addEventListener("click", async () => {
       target: { tabId: tabs[0].id! },
     });
 
-    const response: any = await new Promise((resolve, reject) => {
+    const response: ExtractedContent = await new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error("본문 추출 시간이 초과되었습니다 (10초)"));
       }, 10000);
@@ -248,20 +254,17 @@ extractButton.addEventListener("click", async () => {
     await startSummary(newItem);
   } catch (error) {
     console.error("Error:", error);
-    alert(error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.");
+    showToast(error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.", "error");
   } finally {
     updateUI("button", { loading: false }, extractButton, document.getElementById("loading-indicator")!);
     updateUI("loading", { show: false }, extractButton, document.getElementById("loading-indicator")!);
   }
 });
 
-// Helper to start summary from pending or retry
-async function startSummary(item) {
-  // 상태 변경은 ServiceWorker에 먼저 반영
+async function startSummary(item: SummaryItem) {
   await stateUpdateSummary(item.id, "", "in-progress", undefined, MAX_HISTORY_ITEMS);
   await refreshLocalHistory(MAX_HISTORY_ITEMS);
 
-  // generateSummaryWithEngine을 직접 호출, 콜백으로 진행률/완료/에러 처리
   try {
     await initializeMLCEngine();
     let partial = "";
@@ -345,7 +348,7 @@ setOnHistoryChanged(() => {
 });
 
 // 삭제 핸들러 래퍼 함수 추가
-async function handleDeleteSummary(item) {
+async function handleDeleteSummary(item: SummaryItem) {
   if (confirm("이 요약을 삭제하시겠습니까?")) {
     try {
       await stateDeleteSummary(item.id, MAX_HISTORY_ITEMS);
@@ -359,7 +362,7 @@ async function handleDeleteSummary(item) {
       );
     } catch (error) {
       console.error("Error deleting summary:", error);
-      alert("삭제 중 오류가 발생했습니다.");
+      showToast("삭제 중 오류가 발생했습니다.", "error");
     }
   }
 }

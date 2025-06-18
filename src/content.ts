@@ -1,6 +1,5 @@
 import { Readability } from "@mozilla/readability";
 
-// 타입 정의
 interface ExtractedContent {
   content: string;
   title: string;
@@ -8,7 +7,13 @@ interface ExtractedContent {
 
 interface ChromeMessage {
   type: string;
-  [key: string]: any;
+  [key: string]: unknown;
+}
+
+declare global {
+  interface Window {
+    __webllm_content_listener_registered?: boolean;
+  }
 }
 
 function extractMainContent(): ExtractedContent {
@@ -23,8 +28,8 @@ function extractMainContent(): ExtractedContent {
 }
 
 // 메시지 리스너
-if (!(window as any).__webllm_content_listener_registered) {
-  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+if (!window.__webllm_content_listener_registered) {
+  chrome.runtime.onMessage.addListener((request: ChromeMessage, sender, sendResponse) => {
     if (request.type === "EXTRACT_MAIN_CONTENT") {
       try {
         const result = extractMainContent();
@@ -40,5 +45,5 @@ if (!(window as any).__webllm_content_listener_registered) {
     }
     return false;
   });
-  (window as any).__webllm_content_listener_registered = true;
+  window.__webllm_content_listener_registered = true;
 }

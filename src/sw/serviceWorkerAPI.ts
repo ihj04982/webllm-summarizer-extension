@@ -1,5 +1,7 @@
+import type { SummaryItem } from "../types";
+
 export class ServiceWorkerAPI {
-  private static async sendMessage(message: any): Promise<any> {
+  private static async sendMessage(message: Record<string, unknown>): Promise<unknown> {
     let attempt = 0;
     const maxAttempts = 2;
     while (attempt < maxAttempts) {
@@ -20,7 +22,7 @@ export class ServiceWorkerAPI {
               return;
             }
             if (!response) {
-              console.warn("No response from service worker for:", message.type);
+              console.warn("No response from service worker for:", (message as { type?: string }).type);
               resolve({});
               return;
             }
@@ -37,9 +39,9 @@ export class ServiceWorkerAPI {
     }
   }
 
-  static async getHistory(limit?: number): Promise<any[]> {
+  static async getHistory(limit?: number): Promise<SummaryItem[]> {
     try {
-      const response = await this.sendMessage({ type: "GET_HISTORY", limit });
+      const response = (await this.sendMessage({ type: "GET_HISTORY", limit })) as { history?: SummaryItem[] };
       return response.history || [];
     } catch (error) {
       console.error("Failed to get history:", error);
@@ -47,9 +49,9 @@ export class ServiceWorkerAPI {
     }
   }
 
-  static async addSummaryItem(item: any, limit: number): Promise<any> {
+  static async addSummaryItem(item: Omit<SummaryItem, "id">, limit: number): Promise<SummaryItem> {
     try {
-      const response = await this.sendMessage({ type: "ADD_SUMMARY_ITEM", item, limit });
+      const response = (await this.sendMessage({ type: "ADD_SUMMARY_ITEM", item, limit })) as { item?: SummaryItem };
       if (!response.item) {
         throw new Error("Failed to add summary item - no item in response");
       }
@@ -59,7 +61,7 @@ export class ServiceWorkerAPI {
       return {
         ...item,
         id: "temp_" + Date.now().toString(),
-      };
+      } as SummaryItem;
     }
   }
 
@@ -79,7 +81,7 @@ export class ServiceWorkerAPI {
 
   static async getCachedSummary(contentHash: string): Promise<string | null> {
     try {
-      const response = await this.sendMessage({ type: "GET_CACHED_SUMMARY", contentHash });
+      const response = (await this.sendMessage({ type: "GET_CACHED_SUMMARY", contentHash })) as { cached?: string };
       return response.cached || null;
     } catch (error) {
       console.error("Failed to get cached summary:", error);
@@ -97,7 +99,7 @@ export class ServiceWorkerAPI {
 
   static async deleteSummary(id: string, limit: number): Promise<boolean> {
     try {
-      const response = await this.sendMessage({ type: "DELETE_SUMMARY", id, limit });
+      const response = (await this.sendMessage({ type: "DELETE_SUMMARY", id, limit })) as { success?: boolean };
       return response.success || false;
     } catch (error) {
       console.error("Failed to delete summary:", error);

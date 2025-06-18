@@ -207,8 +207,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case "RELEASE_RESOURCES":
       try {
-        if (mlcHandler && typeof (mlcHandler as any).dispose === "function") {
-          (mlcHandler as any).dispose();
+        if (mlcHandler && typeof (mlcHandler as unknown as { dispose?: () => void }).dispose === "function") {
+          (mlcHandler as unknown as { dispose: () => void }).dispose();
         }
         unloadEngine().catch(console.error);
         sendResponse({ success: true });
@@ -237,17 +237,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // 유틸리티 함수
 // ============================================================================
 
-function generateHash(content: string): string {
-  let hash = 0;
-  for (let i = 0; i < content.length; i++) {
-    const char = content.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash = hash & hash;
-  }
-  return hash.toString();
-}
-
-async function broadcastToSidePanels(message: any) {
+async function broadcastToSidePanels(message: Record<string, unknown>) {
   try {
     const tabs = await chrome.tabs.query({});
     tabs.forEach((tab) => {
@@ -270,8 +260,8 @@ setInterval(() => {
 // 확장 프로그램 아이콘 클릭 시 사이드패널 열기
 chrome.action.onClicked.addListener((tab: chrome.tabs.Tab) => {
   if (tab.windowId) {
-    // TypeScript 타입 에러 우회 - Chrome API 타입 정의 문제
-    (chrome.sidePanel as any).open({ windowId: tab.windowId });
+    // @ts-expect-error: Chrome API 타입 정의 문제로 인한 우회
+    chrome.sidePanel.open({ windowId: tab.windowId });
     console.log("Side panel opened for window:", tab.windowId);
   } else {
     console.error("No window ID found for tab");
@@ -293,8 +283,8 @@ chrome.runtime.onConnect.addListener(function (port) {
 
   port.onDisconnect.addListener(async () => {
     try {
-      if (mlcHandler && typeof (mlcHandler as any).dispose === "function") {
-        (mlcHandler as any).dispose();
+      if (mlcHandler && typeof (mlcHandler as unknown as { dispose?: () => void }).dispose === "function") {
+        (mlcHandler as unknown as { dispose: () => void }).dispose();
       }
       await unloadEngine();
     } catch (error) {

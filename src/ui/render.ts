@@ -18,7 +18,6 @@ export function renderHistory(
     card.className = `history-card status-${item.status}`;
     card.setAttribute("data-id", item.id);
 
-    // Status badge/icon
     let statusBadge = "";
     if (item.status === "pending") {
       statusBadge = '<span class="status-badge badge-pending"><i class="fa fa-clock"></i> 대기 중</span>';
@@ -30,7 +29,6 @@ export function renderHistory(
       statusBadge = '<span class="status-badge badge-error"><i class="fa fa-exclamation-circle"></i> 오류</span>';
     }
 
-    // Summary area
     let summaryHtml = "";
     if (item.status === "error") {
       summaryHtml = `<div class="summary-error">${item.error || "오류"}</div>`;
@@ -40,7 +38,6 @@ export function renderHistory(
       summaryHtml = normalizeNewlines(cleanThinkTags(item.summary)).replace(/\n/g, "<br>");
     }
 
-    // Always show retry button, disable if in-progress
     let retryDisabled = item.status === "in-progress" ? "disabled" : "";
     let actionBtnHtml = `<button class="retry-button" ${retryDisabled}><i class="fa-solid fa-rotate-right"></i></button>`;
 
@@ -79,21 +76,29 @@ export function renderHistory(
   });
 }
 
+export type UpdateUIData = { loading: boolean } | { show: boolean };
+
 export function updateUI(
   type: "button" | "loading",
-  data: any,
+  data: UpdateUIData,
   extractButton: HTMLElement,
   loadingIndicator: HTMLElement
 ) {
   switch (type) {
-    case "button":
+    case "button": {
       const btn = extractButton as HTMLButtonElement;
-      btn.disabled = data.loading;
+      if ("loading" in data) {
+        btn.disabled = data.loading;
+      }
       btn.innerText = "페이지 요약하기";
       break;
-    case "loading":
-      loadingIndicator.style.display = data.show ? "block" : "none";
+    }
+    case "loading": {
+      if ("show" in data) {
+        loadingIndicator.style.display = data.show ? "block" : "none";
+      }
       break;
+    }
   }
 }
 

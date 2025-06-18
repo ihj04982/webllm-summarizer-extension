@@ -1,7 +1,6 @@
 import type { MLCEngineInterface, ChatCompletionMessageParam } from "@mlc-ai/web-llm";
 import { CreateExtensionServiceWorkerMLCEngine } from "@mlc-ai/web-llm";
 
-// Extension Service Worker 기반 엔진 관리
 let engine: MLCEngineInterface | null = null;
 
 function isEngineAlive(): boolean {
@@ -9,9 +8,9 @@ function isEngineAlive(): boolean {
 }
 
 export async function unloadEngine(): Promise<void> {
-  if (engine && typeof (engine as any).unload === "function") {
+  if (engine && typeof engine.unload === "function") {
     try {
-      await (engine as any).unload();
+      await engine.unload();
     } catch (e) {
       console.warn("엔진 unload 중 에러", e);
     }
@@ -65,7 +64,6 @@ export async function generateSummaryWithEngine(
     ];
     let result = "";
     try {
-      console.log("[engineManager] 요약 생성 시작", { messages });
       const completion = await engine.chat.completions.create({
         stream: true,
         messages,
@@ -76,15 +74,14 @@ export async function generateSummaryWithEngine(
         if (curDelta) {
           result += curDelta;
           if (callbacks.onPartial) callbacks.onPartial(result);
-          console.log("[engineManager] 요약 중간 결과", result);
         }
       }
       if (callbacks.onDone) callbacks.onDone(result);
-      console.log("[engineManager] 요약 최종 결과", result);
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       await unloadEngine();
-      const errMsg = (error?.message || "") as string;
+      const errMsg =
+        error && typeof error === "object" && "message" in error ? (error as { message?: string }).message || "" : "";
       if (!retry && /gpu|webgpu|memory|device lost|out of memory/i.test(errMsg)) {
         retry = true;
         continue;

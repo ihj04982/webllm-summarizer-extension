@@ -1,7 +1,6 @@
 import type { SummaryItem } from "../types";
 import { ServiceWorkerAPI } from "../sw/serviceWorkerAPI";
 
-// 상태 변수
 let localHistory: (SummaryItem & { partialSummary?: string })[] = [];
 let currentRequestId = 0;
 let activeSummaryRequests = new Map<string, SummaryItem>();
@@ -24,12 +23,12 @@ export function setOnHistoryChanged(cb: () => void) {
 }
 
 export async function refreshLocalHistory(maxItems: number) {
-  localHistory = await ServiceWorkerAPI.getHistory(maxItems);
+  localHistory = (await ServiceWorkerAPI.getHistory(maxItems)) as (SummaryItem & { partialSummary?: string })[];
   if (onHistoryChanged) onHistoryChanged();
 }
 
-export async function addSummaryItem(item: Omit<SummaryItem, "id">, maxItems: number) {
-  const newItem = await ServiceWorkerAPI.addSummaryItem(item, maxItems);
+export async function addSummaryItem(item: Omit<SummaryItem, "id">, maxItems: number): Promise<SummaryItem> {
+  const newItem = (await ServiceWorkerAPI.addSummaryItem(item, maxItems)) as SummaryItem;
   await refreshLocalHistory(maxItems);
   return newItem;
 }
@@ -50,7 +49,6 @@ export async function deleteSummary(id: string, maxItems: number) {
   await refreshLocalHistory(maxItems);
 }
 
-// 실시간 요약(스트리밍) 중간 결과를 상태에 반영
 export function setPartialSummary(itemId: string, partial: string) {
   const item = localHistory.find((item) => item.id === itemId);
   if (item) {
