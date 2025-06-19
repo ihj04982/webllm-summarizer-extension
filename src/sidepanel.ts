@@ -19,6 +19,7 @@ import {
   updateSummaryInPlace,
   finalizeSummary,
   handleSummaryError,
+  renderProgressBar,
 } from "./ui/render";
 import { setupCardEventListeners, bindAppEvents } from "./ui/events";
 import type { SummaryItem } from "./types";
@@ -132,6 +133,7 @@ async function handleDeleteSummary(item: SummaryItem) {
 }
 
 function onExtract() {
+  setExtractButtonEnabled(false);
   if (isSummarizing) return;
   if (!isModelReady) return;
   updateUI("button", { loading: true }, extractButton, document.getElementById("loading-indicator")!);
@@ -236,6 +238,7 @@ setOnHistoryChanged(onHistoryChanged);
   setAllRetryButtonsEnabled(false);
   setDeleteButtonsEnabled(false);
 
+  renderProgressBar(loadingContainerWrapper);
   initializeMLCEngine();
 })();
 

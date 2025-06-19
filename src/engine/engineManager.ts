@@ -2,19 +2,57 @@ import type { MLCEngineInterface, ChatCompletionMessageParam } from "@mlc-ai/web
 import { CreateExtensionServiceWorkerMLCEngine } from "@mlc-ai/web-llm";
 
 let engine: MLCEngineInterface | null = null;
+let webgpuResources: { destroy?: () => void; release?: () => void }[] = [];
 
 function isEngineAlive(): boolean {
   return !!engine;
 }
 
-export async function unloadEngine(): Promise<void> {
-  if (engine && typeof engine.unload === "function") {
-    try {
-      await engine.unload();
-    } catch (e) {
-      console.warn("엔진 unload 중 에러", e);
+export function trackWebGPUResource(resource: { destroy?: () => void; release?: () => void }) {
+  webgpuResources.push(resource);
+}
+
+export function cleanupWebGPUResources() {
+  for (let i = webgpuResources.length - 1; i >= 0; --i) {
+    const res = webgpuResources[i];
+    if (res && typeof res.destroy === "function") {
+      try {
+        res.destroy();
+      } catch {}
+    } else if (res && typeof res.release === "function") {
+      try {
+        res.release();
+      } catch {}
     }
   }
+  webgpuResources = [];
+}
+
+export async function unloadEngine(): Promise<void> {
+  if (engine) {
+    if (typeof engine.unload === "function") {
+      try {
+        await engine.unload();
+      } catch (e) {
+        console.warn("엔진 unload 중 에러", e);
+      }
+    }
+    if (typeof (engine as any).dispose === "function") {
+      try {
+        await (engine as any).dispose();
+      } catch (e) {
+        console.warn("엔진 dispose 중 에러", e);
+      }
+    }
+    if (typeof (engine as any).cleanup === "function") {
+      try {
+        await (engine as any).cleanup();
+      } catch (e) {
+        console.warn("엔진 cleanup 중 에러", e);
+      }
+    }
+  }
+  cleanupWebGPUResources();
   engine = null;
 }
 

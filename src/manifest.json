@@ -1,12 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "WebLLM Summarizer",
+  "name": "NoServer.ai",
   "version": "1.0",
-  "description": "WebLLM을 사용한 웹 페이지 요약 확장 프로그램",
+  "description": "On-device Web Summarizer",
 
-  "permissions": ["activeTab", "storage", "unlimitedStorage", "sidePanel", "scripting"],
-  "host_permissions": ["<all_urls>"],
-
+  "permissions": ["activeTab", "storage", "sidePanel", "scripting"],
+  "host_permissions": ["http://*/*", "https://*/*"],
   "background": {
     "service_worker": "background.js",
     "type": "module"
