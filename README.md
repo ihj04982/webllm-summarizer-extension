@@ -6,6 +6,8 @@ NoServer.ai는 WebLLM을 활용하여 서버 전송 없이 사용자의 브라�
 
 [🛠 Chrome 웹스토어에서 설치하기](https://chromewebstore.google.com/detail/noserverai/pibgbfelegjdiiohmgamhaegfkinbfjg?authuser=0&hl=en)
 
+[📋 개발 회고 보러가기](https://velog.io/@ihj04982/ChatGPT%EB%B3%B4%EB%8B%A4-40%EB%B0%B0-%EB%8A%90%EB%A6%B0-AI%EB%A5%BC-%EB%A7%8C%EB%93%A0-%EC%9D%B4%EC%9C%A0-%EB%B8%8C%EB%9D%BC%EC%9A%B0%EC%A0%80-%EC%98%A8%EB%94%94%EB%B0%94%EC%9D%B4%EC%8A%A4-AI-%EA%B0%9C%EB%B0%9C%EA%B8%B0-lmft186o)
+
 ---
 
 ## 주요 특징
