@@ -175,7 +175,7 @@ function onExtract() {
       });
       const newItem = await addSummaryItem(
         {
-          content: content.length > 3000 ? content.substring(0, 3000) + "..." : content,
+          content,
           summary: "",
           timestamp,
           title,
