@@ -20,15 +20,25 @@ interface SummaryItem {
 
 class DataManager {
   private summaryHistory: SummaryItem[] = [];
+  /** O(1) lookup by id for updateSummary; kept in sync with summaryHistory. */
+  private summaryById = new Map<string, SummaryItem>();
   private summaryCache = new Map<string, string>();
   private readonly MAX_HISTORY_ITEMS = 50;
   private readonly MAX_CACHE_SIZE = 100;
+
+  private rebuildIdMap() {
+    this.summaryById.clear();
+    for (const item of this.summaryHistory) {
+      this.summaryById.set(item.id, item);
+    }
+  }
 
   async init() {
     const stored = await chrome.storage.local.get(["summaryHistory", "summaryCache"]);
 
     if (stored.summaryHistory) {
       this.summaryHistory = stored.summaryHistory;
+      this.rebuildIdMap();
     }
 
     if (stored.summaryCache) {
@@ -45,9 +55,12 @@ class DataManager {
     };
 
     this.summaryHistory.unshift(newItem);
+    this.summaryById.set(newItem.id, newItem);
 
     if (this.summaryHistory.length > this.MAX_HISTORY_ITEMS) {
+      const removed = this.summaryHistory.slice(this.MAX_HISTORY_ITEMS);
       this.summaryHistory = this.summaryHistory.slice(0, this.MAX_HISTORY_ITEMS);
+      for (const item of removed) this.summaryById.delete(item.id);
     }
 
     await this.persistData();
@@ -60,7 +73,7 @@ class DataManager {
     status: "pending" | "in-progress" | "done" | "error" = "done",
     error: string | null = null
   ) {
-    const item = this.summaryHistory.find((item) => item.id === id);
+    const item = this.summaryById.get(id);
     if (item) {
       item.summary = summary;
       item.status = status;
@@ -70,9 +83,12 @@ class DataManager {
   }
 
   async deleteSummary(id: string) {
-    const index = this.summaryHistory.findIndex((item) => item.id === id);
+    const item = this.summaryById.get(id);
+    if (!item) return false;
+    const index = this.summaryHistory.indexOf(item);
     if (index !== -1) {
       this.summaryHistory.splice(index, 1);
+      this.summaryById.delete(id);
       await this.persistData();
       return true;
     }
@@ -111,7 +127,7 @@ class DataManager {
       const itemTime = new Date(item.timestamp).getTime();
       return itemTime > thirtyDaysAgo;
     });
-
+    this.rebuildIdMap();
     await this.persistData();
   }
 }

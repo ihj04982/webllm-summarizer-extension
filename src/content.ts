@@ -17,8 +17,8 @@ declare global {
 }
 
 function extractMainContent(): ExtractedContent {
-  const doc = document.implementation.createHTMLDocument();
-  doc.body.innerHTML = document.body.innerHTML;
+  // Clone the document to avoid innerHTML serialize/parse cost on large pages.
+  const doc = document.cloneNode(true) as Document;
   const reader = new Readability(doc);
   const article = reader.parse();
   return {

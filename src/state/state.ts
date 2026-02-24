@@ -5,6 +5,8 @@ let localHistory: (SummaryItem & { partialSummary?: string })[] = [];
 let currentRequestId = 0;
 let activeSummaryRequests = new Map<string, SummaryItem>();
 let onHistoryChanged: (() => void) | null = null;
+/** Called when only one item's partial summary text changes (streaming) to avoid full re-render. */
+let onPartialSummaryUpdated: ((itemId: string, partial: string) => void) | null = null;
 
 export function getLocalHistory() {
   return localHistory;
@@ -20,6 +22,9 @@ export function getActiveSummaryRequests() {
 }
 export function setOnHistoryChanged(cb: () => void) {
   onHistoryChanged = cb;
+}
+export function setOnPartialSummaryUpdated(cb: (itemId: string, partial: string) => void) {
+  onPartialSummaryUpdated = cb;
 }
 
 export async function refreshLocalHistory(maxItems: number) {
@@ -53,6 +58,10 @@ export function setPartialSummary(itemId: string, partial: string) {
   const item = localHistory.find((item) => item.id === itemId);
   if (item) {
     item.partialSummary = partial;
-    if (onHistoryChanged) onHistoryChanged();
+    if (onPartialSummaryUpdated) {
+      onPartialSummaryUpdated(itemId, partial);
+    } else if (onHistoryChanged) {
+      onHistoryChanged();
+    }
   }
 }

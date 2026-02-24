@@ -15,6 +15,7 @@ export function setupCardEventListeners(
       contentBody.style.display = isHidden ? "block" : "none";
       contentDiv.classList.toggle("expanded", isHidden);
       toggleBtn.textContent = isHidden ? "접기" : "더보기";
+      toggleBtn.setAttribute("aria-expanded", String(isHidden));
     });
   }
 

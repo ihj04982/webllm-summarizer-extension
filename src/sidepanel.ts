@@ -7,16 +7,18 @@ import {
   updateSummary as stateUpdateSummary,
   deleteSummary as stateDeleteSummary,
   setOnHistoryChanged,
+  setOnPartialSummaryUpdated,
   setPartialSummary,
 } from "./state/state";
 import {
   renderHistoryPanel,
   setProgressBar,
-  renderModelStatusText,
   setExtractButtonEnabled,
+  renderModelStatusText,
   showToast,
   updateUI,
   updateSummaryInPlace,
+  updateSummaryCardContent,
   finalizeSummary,
   handleSummaryError,
   renderProgressBar,
@@ -225,6 +227,9 @@ bindAppEvents({
 });
 
 setOnHistoryChanged(onHistoryChanged);
+setOnPartialSummaryUpdated((itemId, partial) => {
+  updateSummaryCardContent(historyWrapper, itemId, partial, cleanThinkTags);
+});
 
 (async () => {
   await refreshLocalHistory(MAX_HISTORY_ITEMS);
@@ -238,7 +243,8 @@ setOnHistoryChanged(onHistoryChanged);
   setAllRetryButtonsEnabled(false);
   setDeleteButtonsEnabled(false);
 
-  renderProgressBar(loadingContainerWrapper);
+  const loadingBarContainer = document.getElementById("loadingContainer");
+  renderProgressBar(loadingBarContainer ?? loadingContainerWrapper);
   initializeMLCEngine();
 })();
 

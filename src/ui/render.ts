@@ -58,14 +58,23 @@ export function setProgressBar(progress: number) {
   if (progressBar) {
     progressBar.set(progress);
   }
+  const loadingBar = document.getElementById("loadingContainer");
+  if (loadingBar) {
+    const value = Math.round(progress * 100);
+    loadingBar.setAttribute("aria-valuenow", String(value));
+  }
 }
 
 export function renderModelStatusText(progress: number) {
   const statusText = document.getElementById("model-status-text");
+  const wrapper = document.getElementById("loadingContainerWrapper");
   if (statusText) {
     if (progress >= 1.0) {
       statusText.textContent = "AI 모델 준비 완료!";
-      hideLoadingState(document.getElementById("loadingContainerWrapper")!);
+      if (wrapper) {
+        wrapper.setAttribute("aria-busy", "false");
+        hideLoadingState(wrapper);
+      }
     } else {
       const percent = Math.round(progress * 100);
       statusText.textContent = `AI 모델 다운로드 중... (${percent}%)`;
@@ -85,6 +94,7 @@ export function renderHistory(
   isSummarizing: boolean
 ) {
   historyWrapper.innerHTML = "";
+  const fragment = document.createDocumentFragment();
   historyToShow.forEach((item) => {
     const card = document.createElement("div");
     card.className = `history-card status-${item.status}`;
@@ -112,9 +122,9 @@ export function renderHistory(
       summaryHtml = escapeHtml(raw).replace(/\n/g, "<br>");
     }
 
-    let retryDisabled = item.status === "in-progress" ? "disabled" : "";
-    let actionBtnHtml = `<button class="retry-button" ${retryDisabled}><i class="fa-solid fa-rotate-right"></i></button>`;
-    let deleteDisabled = isSummarizing && item.status === "in-progress" ? "disabled" : "";
+    const retryDisabled = item.status === "in-progress" ? "disabled" : "";
+    const actionBtnHtml = `<button type="button" class="retry-button" aria-label="다시 요약" ${retryDisabled}><i class="fa-solid fa-rotate-right" aria-hidden="true"></i></button>`;
+    const deleteDisabled = isSummarizing && item.status === "in-progress" ? "disabled" : "";
 
     const safeUrl = safeHref(item.url);
     const safeTitle = escapeHtml(item.title);
@@ -128,10 +138,10 @@ export function renderHistory(
         ${statusBadge}
           <div class="content-title">
           ${safeTitle}
-          <a href="${safeUrl}" target="_blank" rel="noopener noreferrer">
-            <i class="fa-solid fa-external-link-alt"></i>
+          <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" aria-label="원문 열기: ${safeTitle}">
+            <i class="fa-solid fa-external-link-alt" aria-hidden="true"></i>
           </a>
-          <button class="toggle-button">더보기</button>
+          <button type="button" class="toggle-button" aria-expanded="false">더보기</button>
           </div>
           <div class="content-body" style="display: none;">${safeContent}</div>
           </div>
@@ -142,19 +152,20 @@ export function renderHistory(
       <div class="meta-container">
         <span class="history-timestamp">${safeTimestamp}</span>
         <div class="meta-actions">
-          <button class="copy-button" title="Copy the Summary to the Clipboard">
-            <i class="fa-solid fa-copy fa-lg"></i>
+          <button type="button" class="copy-button" aria-label="요약 복사" title="클립보드에 복사">
+            <i class="fa-solid fa-copy fa-lg" aria-hidden="true"></i>
           </button>
           ${actionBtnHtml}
-          <button class="delete-button" title="Delete this summary" data-id="${safeId}" ${deleteDisabled}>
-            <i class="fa-solid fa-trash fa-sm"></i>
+          <button type="button" class="delete-button" aria-label="요약 삭제" title="이 요약 삭제" data-id="${safeId}" ${deleteDisabled}>
+            <i class="fa-solid fa-trash fa-sm" aria-hidden="true"></i>
           </button>
         </div>
       </div>
     `;
     setupCardEventListeners(card, item);
-    historyWrapper.appendChild(card);
+    fragment.appendChild(card);
   });
+  historyWrapper.appendChild(fragment);
 }
 
 export function renderHistoryPanel(
@@ -180,7 +191,9 @@ export function updateUI(
       if ("loading" in data) {
         btn.disabled = data.loading;
       }
-      btn.innerText = "페이지 요약하기";
+      const span = btn.querySelector("span");
+      if (span) span.textContent = "페이지 요약하기";
+      else btn.innerText = "페이지 요약하기";
       break;
     }
     case "loading": {
@@ -214,6 +227,24 @@ export function updateSummaryInPlace(
   cleanThinkTags: (str: string) => string
 ) {
   setPartialSummary(itemId, cleanThinkTags(normalizeNewlines(partialSummary)));
+}
+
+/**
+ * Updates only the summary text of one card (by data-id). Use during streaming to avoid
+ * full history re-render and layout thrashing.
+ */
+export function updateSummaryCardContent(
+  historyWrapper: HTMLElement,
+  itemId: string,
+  partialSummary: string,
+  cleanThinkTags: (str: string) => string
+) {
+  const card = historyWrapper.querySelector(`[data-id="${CSS.escape(itemId)}"]`);
+  const summaryEl = card?.querySelector<HTMLElement>(".summary-text");
+  if (summaryEl) {
+    const raw = normalizeNewlines(cleanThinkTags(partialSummary));
+    summaryEl.innerHTML = escapeHtml(raw).replace(/\n/g, "<br>");
+  }
 }
 
 export async function finalizeSummary(
