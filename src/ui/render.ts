@@ -46,7 +46,7 @@ export function renderProgressBar(container: HTMLElement) {
     strokeWidth: 4,
     easing: "easeInOut",
     duration: 1400,
-    color: "#ffd166",
+    color: "#2563EB",
     trailColor: "#eee",
     trailWidth: 1,
     svgStyle: { width: "100%", height: "100%" },
@@ -77,7 +77,7 @@ export function renderModelStatusText(progress: number) {
       }
     } else {
       const percent = Math.round(progress * 100);
-      statusText.textContent = `AI 모델 다운로드 중... (${percent}%)`;
+      statusText.textContent = `AI 모델 다운로드 중… (${percent}%)`;
     }
   }
 }
@@ -87,6 +87,13 @@ export function setExtractButtonEnabled(enabled: boolean) {
   if (extractButton) extractButton.disabled = !enabled;
 }
 
+const EMPTY_HISTORY_HTML = `
+  <div class="history-empty" role="status" aria-label="요약 히스토리 없음">
+    <p class="history-empty-text">아직 요약한 페이지가 없습니다.</p>
+    <p class="history-empty-hint">위의 <strong>페이지 요약하기</strong> 버튼을 눌러 시작하세요.</p>
+  </div>
+`;
+
 export function renderHistory(
   historyToShow: (SummaryItem & { partialSummary?: string })[],
   historyWrapper: HTMLElement,
@@ -94,11 +101,15 @@ export function renderHistory(
   isSummarizing: boolean
 ) {
   historyWrapper.innerHTML = "";
+  if (historyToShow.length === 0) {
+    historyWrapper.insertAdjacentHTML("beforeend", EMPTY_HISTORY_HTML);
+    return;
+  }
   const fragment = document.createDocumentFragment();
   historyToShow.forEach((item) => {
-    const card = document.createElement("div");
-    card.className = `history-card status-${item.status}`;
-    card.setAttribute("data-id", item.id);
+    const itemEl = document.createElement("article");
+    itemEl.className = `history-item status-${item.status}`;
+    itemEl.setAttribute("data-id", item.id);
 
     let statusBadge = "";
     if (item.status === "pending") {
@@ -132,12 +143,12 @@ export function renderHistory(
     const safeTimestamp = escapeHtml(item.timestamp);
     const safeId = escapeHtml(item.id);
 
-    card.innerHTML = `
+    itemEl.innerHTML = `
       <div class="section-container">
         <div class="content-text">
         ${statusBadge}
           <div class="content-title">
-          ${safeTitle}
+          <span class="content-title-text">${safeTitle}</span>
           <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" aria-label="원문 열기: ${safeTitle}">
             <i class="fa-solid fa-external-link-alt" aria-hidden="true"></i>
           </a>
@@ -162,8 +173,8 @@ export function renderHistory(
         </div>
       </div>
     `;
-    setupCardEventListeners(card, item);
-    fragment.appendChild(card);
+    setupCardEventListeners(itemEl, item);
+    fragment.appendChild(itemEl);
   });
   historyWrapper.appendChild(fragment);
 }
@@ -210,6 +221,8 @@ export function showToast(message: string, type: "error" | "info" | "success" = 
   if (!toast) {
     toast = document.createElement("div");
     toast.id = "toast-container";
+    toast.setAttribute("role", "status");
+    toast.setAttribute("aria-live", "polite");
     document.body.appendChild(toast);
   }
   toast.textContent = message;

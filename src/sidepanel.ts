@@ -47,9 +47,9 @@ function setAllRetryButtonsEnabled(enabled: boolean) {
 }
 
 function setDeleteButtonsEnabled(isSummarizing: boolean) {
-  document.querySelectorAll<HTMLDivElement>(".history-card").forEach((card) => {
-    const isInProgress = card.classList.contains("status-in-progress");
-    const deleteBtn = card.querySelector<HTMLButtonElement>(".delete-button");
+  document.querySelectorAll<HTMLElement>(".history-item").forEach((itemEl) => {
+    const isInProgress = itemEl.classList.contains("status-in-progress");
+    const deleteBtn = itemEl.querySelector<HTMLButtonElement>(".delete-button");
     if (deleteBtn) {
       if (isSummarizing && isInProgress) {
         deleteBtn.disabled = true;
@@ -169,7 +169,8 @@ function onExtract() {
       });
       const { content, title } = response;
       const currentUrl = tabs[0].url || "";
-      const timestamp = new Date().toLocaleString("en-US", {
+      const locale = navigator.language || "ko-KR";
+      const timestamp = new Date().toLocaleString(locale, {
         month: "short",
         day: "2-digit",
         hour: "2-digit",

@@ -1,4 +1,5 @@
 import type { SummaryItem } from "../types";
+import { showToast } from "./render";
 
 export function setupCardEventListeners(
   card: Element,
@@ -23,7 +24,13 @@ export function setupCardEventListeners(
   if (copyBtn) {
     copyBtn.addEventListener("click", () => {
       const formattedText = `${item.summary}\n\n출처: ${item.title}\n${item.url}`;
-      navigator.clipboard.writeText(formattedText).catch((err) => console.error("Could not copy text: ", err));
+      navigator.clipboard
+        .writeText(formattedText)
+        .then(() => showToast("복사되었습니다", "success"))
+        .catch((err) => {
+          console.error("Could not copy text: ", err);
+          showToast("복사에 실패했습니다.", "error");
+        });
     });
   }
 
