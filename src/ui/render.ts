@@ -126,10 +126,10 @@ export function renderHistory(
     if (item.status === "error") {
       summaryHtml = `<div class="summary-error">${escapeHtml(item.error || "오류")}</div>`;
     } else if (item.partialSummary) {
-      const raw = normalizeNewlines(cleanThinkTags(item.partialSummary));
+      const raw = normalizeNewlines(cleanThinkTags(item.partialSummary)).trim();
       summaryHtml = escapeHtml(raw).replace(/\n/g, "<br>");
     } else {
-      const raw = normalizeNewlines(cleanThinkTags(item.summary));
+      const raw = normalizeNewlines(cleanThinkTags(item.summary)).trim();
       summaryHtml = escapeHtml(raw).replace(/\n/g, "<br>");
     }
 
@@ -255,7 +255,7 @@ export function updateSummaryCardContent(
   const card = historyWrapper.querySelector(`[data-id="${CSS.escape(itemId)}"]`);
   const summaryEl = card?.querySelector<HTMLElement>(".summary-text");
   if (summaryEl) {
-    const raw = normalizeNewlines(cleanThinkTags(partialSummary));
+    const raw = normalizeNewlines(cleanThinkTags(partialSummary)).trim();
     summaryEl.innerHTML = escapeHtml(raw).replace(/\n/g, "<br>");
   }
 }

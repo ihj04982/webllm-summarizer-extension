@@ -1,5 +1,6 @@
 import type { SummaryItem } from "../types";
-import { showToast } from "./render";
+import { cleanThinkTags } from "../sidepanel";
+import { normalizeNewlines, showToast } from "./render";
 
 export function setupCardEventListeners(
   card: Element,
@@ -23,7 +24,8 @@ export function setupCardEventListeners(
   const copyBtn = card.querySelector<HTMLButtonElement>(".copy-button");
   if (copyBtn) {
     copyBtn.addEventListener("click", () => {
-      const formattedText = `${item.summary}\n\n출처: ${item.title}\n${item.url}`;
+      const cleanedSummary = normalizeNewlines(cleanThinkTags(item.summary)).trim();
+      const formattedText = `${cleanedSummary}\n\n출처: ${item.title.trim()}\n${item.url.trim()}`;
       navigator.clipboard
         .writeText(formattedText)
         .then(() => showToast("복사되었습니다", "success"))
