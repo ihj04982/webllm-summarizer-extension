@@ -146,6 +146,26 @@ chrome.runtime.onInstalled.addListener(async () => {
 initializeServiceWorker().catch(console.error);
 
 // ============================================================================
+// 입력 검증 (메시지 페이로드)
+// ============================================================================
+
+function isSummaryItemPayload(item: unknown): item is Omit<SummaryItem, "id" | "status" | "error"> {
+  if (!item || typeof item !== "object") return false;
+  const o = item as Record<string, unknown>;
+  return (
+    typeof o.content === "string" &&
+    typeof o.summary === "string" &&
+    typeof o.timestamp === "string" &&
+    typeof o.title === "string" &&
+    typeof o.url === "string"
+  );
+}
+
+function isNonEmptyString(v: unknown): v is string {
+  return typeof v === "string" && v.length > 0;
+}
+
+// ============================================================================
 // 데이터 관리 메시지 핸들러
 // ============================================================================
 
@@ -155,12 +175,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ success: true });
       break;
 
-    case "GET_HISTORY":
-      const history = dataManager.getHistory(message.limit);
+    case "GET_HISTORY": {
+      const limit = message.limit !== undefined ? Number(message.limit) : undefined;
+      const safeLimit = typeof limit === "number" && limit > 0 && Number.isFinite(limit) ? limit : undefined;
+      const history = dataManager.getHistory(safeLimit);
       sendResponse({ history });
       break;
+    }
 
     case "ADD_SUMMARY_ITEM":
+      if (!isSummaryItemPayload(message.item)) {
+        sendResponse({ success: false, error: "Invalid summary item payload" });
+        break;
+      }
       dataManager
         .addSummary(message.item)
         .then((newItem) => {
@@ -169,28 +196,47 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         })
         .catch((error) => {
           console.error("Error adding summary item:", error);
-          sendResponse({ success: false, error: error.message });
+          sendResponse({ success: false, error: "Failed to add summary" });
         });
       break;
 
     case "UPDATE_SUMMARY":
-      dataManager.updateSummary(message.id, message.summary, message.status, message.error).then(() => {
+      if (!isNonEmptyString(message.id)) {
+        sendResponse({ success: false, error: "Invalid id" });
+        break;
+      }
+      const summary = typeof message.summary === "string" ? message.summary : "";
+      const status = ["pending", "in-progress", "done", "error"].includes(message.status) ? message.status : "done";
+      const err = message.error != null ? String(message.error) : null;
+      dataManager.updateSummary(message.id, summary, status, err).then(() => {
         sendResponse({ success: true });
-        broadcastToSidePanels({ type: "SUMMARY_UPDATED", id: message.id, summary: message.summary });
+        broadcastToSidePanels({ type: "SUMMARY_UPDATED", id: message.id, summary });
       });
       break;
 
     case "GET_CACHED_SUMMARY":
+      if (typeof message.contentHash !== "string") {
+        sendResponse({ cached: null });
+        break;
+      }
       const cached = dataManager.getCachedSummary(message.contentHash);
       sendResponse({ cached });
       break;
 
     case "SET_CACHED_SUMMARY":
+      if (typeof message.contentHash !== "string" || typeof message.summary !== "string") {
+        sendResponse({ success: false });
+        break;
+      }
       dataManager.setCachedSummary(message.contentHash, message.summary);
       sendResponse({ success: true });
       break;
 
     case "DELETE_SUMMARY":
+      if (!isNonEmptyString(message.id)) {
+        sendResponse({ success: false });
+        break;
+      }
       dataManager.deleteSummary(message.id).then((success) => {
         sendResponse({ success });
         if (success) {
@@ -220,10 +266,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       break;
 
-    case "MODEL_LOAD_PROGRESS":
-      chrome.runtime.sendMessage({ type: "MODEL_LOAD_PROGRESS", progress: message.progress });
+    case "MODEL_LOAD_PROGRESS": {
+      const progress = typeof message.progress === "number" && Number.isFinite(message.progress) ? message.progress : 0;
+      chrome.runtime.sendMessage({ type: "MODEL_LOAD_PROGRESS", progress });
       sendResponse({ success: true });
       break;
+    }
 
     default:
       console.warn("Unknown message type:", message.type);

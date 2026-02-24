@@ -4,6 +4,23 @@ import type { SummaryItem } from "../types";
 import { cleanThinkTags } from "../sidepanel";
 import { Line } from "progressbar.js";
 
+/** Escape HTML to prevent XSS when inserting untrusted data into innerHTML. */
+export function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** Safe href: only allow http/https to prevent javascript: or data: XSS. */
+function safeHref(url: string): string {
+  const t = url.trim();
+  if (t.startsWith("http://") || t.startsWith("https://")) return escapeHtml(t);
+  return "#";
+}
+
 export function normalizeNewlines(str: string) {
   return str.replace(/\n{2,}/g, "\n");
 }
@@ -86,42 +103,50 @@ export function renderHistory(
 
     let summaryHtml = "";
     if (item.status === "error") {
-      summaryHtml = `<div class="summary-error">${item.error || "오류"}</div>`;
+      summaryHtml = `<div class="summary-error">${escapeHtml(item.error || "오류")}</div>`;
     } else if (item.partialSummary) {
-      summaryHtml = normalizeNewlines(cleanThinkTags(item.partialSummary)).replace(/\n/g, "<br>");
+      const raw = normalizeNewlines(cleanThinkTags(item.partialSummary));
+      summaryHtml = escapeHtml(raw).replace(/\n/g, "<br>");
     } else {
-      summaryHtml = normalizeNewlines(cleanThinkTags(item.summary)).replace(/\n/g, "<br>");
+      const raw = normalizeNewlines(cleanThinkTags(item.summary));
+      summaryHtml = escapeHtml(raw).replace(/\n/g, "<br>");
     }
 
     let retryDisabled = item.status === "in-progress" ? "disabled" : "";
     let actionBtnHtml = `<button class="retry-button" ${retryDisabled}><i class="fa-solid fa-rotate-right"></i></button>`;
     let deleteDisabled = isSummarizing && item.status === "in-progress" ? "disabled" : "";
 
+    const safeUrl = safeHref(item.url);
+    const safeTitle = escapeHtml(item.title);
+    const safeContent = escapeHtml(item.content).replace(/\n/g, "<br>");
+    const safeTimestamp = escapeHtml(item.timestamp);
+    const safeId = escapeHtml(item.id);
+
     card.innerHTML = `
       <div class="section-container">
         <div class="content-text">
         ${statusBadge}
           <div class="content-title">
-          ${item.title}
-          <a href="${item.url}" target="_blank">
+          ${safeTitle}
+          <a href="${safeUrl}" target="_blank" rel="noopener noreferrer">
             <i class="fa-solid fa-external-link-alt"></i>
           </a>
           <button class="toggle-button">더보기</button>
           </div>
-          <div class="content-body" style="display: none;">${item.content.replace(/\n/g, "<br>")}</div>
+          <div class="content-body" style="display: none;">${safeContent}</div>
           </div>
       </div>
       <div class="section-container">
         <div class="summary-text">${summaryHtml}</div>
       </div>
       <div class="meta-container">
-        <span class="history-timestamp">${item.timestamp}</span>
+        <span class="history-timestamp">${safeTimestamp}</span>
         <div class="meta-actions">
           <button class="copy-button" title="Copy the Summary to the Clipboard">
             <i class="fa-solid fa-copy fa-lg"></i>
           </button>
           ${actionBtnHtml}
-          <button class="delete-button" title="Delete this summary" data-id="${item.id}" ${deleteDisabled}>
+          <button class="delete-button" title="Delete this summary" data-id="${safeId}" ${deleteDisabled}>
             <i class="fa-solid fa-trash fa-sm"></i>
           </button>
         </div>
