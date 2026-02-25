@@ -273,6 +273,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           (mlcHandler as unknown as { dispose: () => void }).dispose();
         }
         unloadEngine().catch(console.error);
+        currentLoadedModelId = null;
         sendResponse({ success: true });
       } catch (error) {
         console.error("Error disposing WebLLM handler:", error);
@@ -280,6 +281,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       } finally {
         mlcHandler = undefined;
       }
+      break;
+
+    case "MODEL_LOADED":
+      currentLoadedModelId = isNonEmptyString(message.modelId) ? message.modelId : null;
+      sendResponse({ success: true });
+      break;
+
+    case "MODEL_UNLOADED":
+      currentLoadedModelId = null;
+      sendResponse({ success: true });
+      break;
+
+    case "GET_LOADED_MODEL":
+      sendResponse({ modelId: currentLoadedModelId });
       break;
 
     case "MODEL_LOAD_PROGRESS": {
@@ -333,6 +348,8 @@ chrome.action.onClicked.addListener((tab: chrome.tabs.Tab) => {
 });
 
 let mlcHandler: ExtensionServiceWorkerMLCEngineHandler | undefined;
+/** Model ID currently loaded in the service worker (survives sidepanel close). */
+let currentLoadedModelId: string | null = null;
 
 chrome.runtime.onConnect.addListener(function (port) {
   console.assert(port.name === "web_llm_service_worker");
@@ -351,14 +368,11 @@ chrome.runtime.onConnect.addListener(function (port) {
       for (const item of inProgressItems) {
         await dataManager.updateSummary(item.id, item.summary, "error", "요약 중 에러 발생");
       }
-      if (mlcHandler && typeof (mlcHandler as unknown as { dispose?: () => void }).dispose === "function") {
-        (mlcHandler as unknown as { dispose: () => void }).dispose();
-      }
-      await unloadEngine();
+      // Do NOT dispose the handler or unload the engine when the sidepanel closes.
+      // Keeping the model in memory allows reuse when the user reopens the sidepanel
+      // without re-downloading. The handler will get the new port via setPort() on reconnect.
     } catch (error) {
-      console.error("Error disposing handler on disconnect:", error);
-    } finally {
-      mlcHandler = undefined;
+      console.error("Error on sidepanel disconnect:", error);
     }
   });
 });

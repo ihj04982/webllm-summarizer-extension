@@ -56,12 +56,22 @@ export async function unloadEngine(): Promise<void> {
   engine = null;
 }
 
-export async function initializeMLCEngine(): Promise<void> {
+export const DEFAULT_MODEL_ID = "Qwen3-4B-q4f16_1-MLC";
+
+async function getSelectedModelId(): Promise<string> {
+  const stored = await chrome.storage.local.get("selectedModelId");
+  const id = typeof stored.selectedModelId === "string" ? stored.selectedModelId.trim() : "";
+  return id || DEFAULT_MODEL_ID;
+}
+
+export async function initializeMLCEngine(modelId?: string): Promise<void> {
   if (isEngineAlive()) {
     return;
   }
 
-  const selectedModel = "Qwen3-4B-q4f16_1-MLC";
+  const selectedModel = modelId !== undefined && modelId !== null && String(modelId).trim()
+    ? String(modelId).trim()
+    : await getSelectedModelId();
   engine = await CreateExtensionServiceWorkerMLCEngine(selectedModel, {
     initProgressCallback: (report: { progress: number }) => {
       chrome.runtime.sendMessage({ type: "MODEL_LOAD_PROGRESS", progress: report.progress });
@@ -131,7 +141,9 @@ async function summarizeChunk(
   });
   let result = "";
   for await (const c of completion) {
-    const delta = c.choices[0]?.delta?.content;
+    const choice = c.choices[0];
+    if (choice?.finish_reason === "abort") break;
+    const delta = choice?.delta?.content;
     if (delta) result += delta;
   }
   return result.trim();
@@ -140,7 +152,7 @@ async function summarizeChunk(
 async function mergeSummaries(
   engine: MLCEngineInterface,
   partialSummaries: string[],
-  callbacks: { onPartial?: (partial: string) => void }
+  callbacks: { onPartial?: (partial: string) => void; signal?: AbortSignal }
 ): Promise<string> {
   const mergedInput = partialSummaries.map((s, i) => `[구간 ${i + 1}]\n${s}`).join("\n\n");
   const systemPrompt = `당신은 전문 한국어 요약 전문가입니다.
@@ -157,7 +169,10 @@ async function mergeSummaries(
   });
   let result = "";
   for await (const c of completion) {
-    const delta = c.choices[0]?.delta?.content;
+    if (callbacks.signal?.aborted) break;
+    const choice = c.choices[0];
+    if (choice?.finish_reason === "abort") break;
+    const delta = choice?.delta?.content;
     if (delta) {
       result += delta;
       if (callbacks.onPartial) callbacks.onPartial(result);
@@ -170,6 +185,10 @@ type GenerateSummaryCallbacks = {
   onPartial?: (partial: string) => void;
   onDone?: (final: string) => void;
   onError?: (error: unknown) => void;
+  /** 단계별 진행 메시지 (Operational transparency) */
+  onProgressStep?: (message: string) => void;
+  /** When aborted (e.g. user clicked Stop), chunk loop and merge exit early; onDone(partial) is called. */
+  signal?: AbortSignal;
 };
 
 const CHUNK_SUMMARY_PROMPT = `당신은 전문 한국어 요약 전문가입니다.
@@ -206,7 +225,9 @@ export async function generateSummaryWithEngine(
           extra_body: { enable_thinking: false },
         });
         for await (const chunk of completion) {
-          const curDelta = chunk.choices[0]?.delta?.content;
+          const choice = chunk.choices[0];
+          if (choice?.finish_reason === "abort") break;
+          const curDelta = choice?.delta?.content;
           if (curDelta) {
             result += curDelta;
             if (callbacks.onPartial) callbacks.onPartial(result);
@@ -217,15 +238,32 @@ export async function generateSummaryWithEngine(
       }
 
       const partialSummaries: string[] = [];
+      const { signal } = callbacks;
       for (let i = 0; i < chunks.length; i++) {
+        if (signal?.aborted) break;
+        if (callbacks.onProgressStep) {
+          callbacks.onProgressStep(`구간 ${i + 1}/${chunks.length} 요약 중…`);
+        }
         const partial = await summarizeChunk(engine, chunks[i], CHUNK_SUMMARY_PROMPT);
         partialSummaries.push(partial);
         if (callbacks.onPartial) {
           callbacks.onPartial(partialSummaries.join("\n\n"));
         }
       }
+      if (signal?.aborted) {
+        const partialText = partialSummaries.length > 0
+          ? partialSummaries.join("\n\n")
+          : "";
+        if (partialText && callbacks.onDone) callbacks.onDone(partialText);
+        else if (!partialText && callbacks.onError) {
+          callbacks.onError(new Error("사용자가 요약을 중단했습니다"));
+        }
+        return partialText;
+      }
+      if (callbacks.onProgressStep) callbacks.onProgressStep("요약 통합 중…");
       const merged = await mergeSummaries(engine, partialSummaries, {
         onPartial: callbacks.onPartial,
+        signal,
       });
       if (callbacks.onDone) callbacks.onDone(merged);
       return merged;

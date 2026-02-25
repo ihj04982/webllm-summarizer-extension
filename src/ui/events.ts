@@ -1,15 +1,20 @@
 import type { SummaryItem } from "../types";
-import { cleanThinkTags } from "../sidepanel";
-import { normalizeNewlines, showToast } from "./render";
+import { cleanThinkTags, normalizeNewlines } from "../utils/text";
+import { showToast } from "./render";
+
+const COPY_SUCCESS_MESSAGE = "복사되었습니다";
 
 export function setupCardEventListeners(
   card: Element,
   item: SummaryItem,
   onRetry: (item: SummaryItem) => void,
-  onDelete: (item: SummaryItem) => void
+  onDelete: (item: SummaryItem) => void,
+  onStop?: () => void
 ) {
   const contentBody = card.querySelector<HTMLElement>(".content-body");
-  const toggleBtn = card.querySelector<HTMLButtonElement>(".content-title .toggle-button");
+  const toggleBtn = card.querySelector<HTMLButtonElement>(
+    ".content-title .toggle-button"
+  );
   const contentDiv = card.querySelector<HTMLElement>(".content-text");
   if (toggleBtn && contentBody && contentDiv) {
     toggleBtn.addEventListener("click", () => {
@@ -24,29 +29,36 @@ export function setupCardEventListeners(
   const copyBtn = card.querySelector<HTMLButtonElement>(".copy-button");
   if (copyBtn) {
     copyBtn.addEventListener("click", () => {
-      const cleanedSummary = normalizeNewlines(cleanThinkTags(item.summary)).trim();
+      const cleanedSummary = normalizeNewlines(
+        cleanThinkTags(item.summary)
+      ).trim();
       const formattedText = `${cleanedSummary}\n\n출처: ${item.title.trim()}\n${item.url.trim()}`;
       navigator.clipboard
         .writeText(formattedText)
-        .then(() => showToast("복사되었습니다", "success"))
+        .then(() => showToast(COPY_SUCCESS_MESSAGE, "success", 4500))
         .catch((err) => {
           console.error("Could not copy text: ", err);
-          showToast("복사에 실패했습니다.", "error");
+          showToast("복사에 실패했습니다", "error");
         });
     });
   }
 
   const deleteBtn = card.querySelector<HTMLButtonElement>(".delete-button");
   if (deleteBtn) {
-    deleteBtn.addEventListener("click", async (e) => {
+    deleteBtn.addEventListener("click", () => {
       if (deleteBtn.disabled) return;
       onDelete(item);
     });
   }
 
+  const stopBtn = card.querySelector<HTMLButtonElement>(".stop-button");
+  if (stopBtn && onStop) {
+    stopBtn.addEventListener("click", () => onStop());
+  }
+
   const retryBtn = card.querySelector<HTMLButtonElement>(".retry-button");
   if (retryBtn && item.status !== "in-progress") {
-    retryBtn.addEventListener("click", async () => {
+    retryBtn.addEventListener("click", () => {
       if (retryBtn.disabled) return;
       onRetry(item);
     });
@@ -62,21 +74,25 @@ interface AppEventHandlers {
 }
 
 export function bindAppEvents(handlers: AppEventHandlers) {
-  const extractButton = document.getElementById("extract-button") as HTMLButtonElement;
+  const extractButton = document.getElementById(
+    "extract-button"
+  ) as HTMLButtonElement;
   if (extractButton) {
     extractButton.addEventListener("click", handlers.onExtract);
   }
 
-  window.addEventListener("beforeunload", () => {
-    chrome.runtime.sendMessage({ type: "RELEASE_RESOURCES" }, (response) => {});
-  });
+  // Do not release model on panel close so reopening the sidepanel can reuse it
+  // without re-downloading. Use RELEASE_RESOURCES only for explicit unload if needed.
 
   document.addEventListener("DOMContentLoaded", () => {
     if (handlers.onHistoryChanged) handlers.onHistoryChanged();
   });
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type === "MODEL_LOAD_PROGRESS" && handlers.onModelLoadProgress) {
+    if (
+      message.type === "MODEL_LOAD_PROGRESS" &&
+      handlers.onModelLoadProgress
+    ) {
       handlers.onModelLoadProgress(message.progress);
     }
   });

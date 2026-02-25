@@ -3,10 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#FAFAFA" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#111827" media="(prefers-color-scheme: dark)" />
+    <meta
+      name="theme-color"
+      content="#F8FAFC"
+      media="(prefers-color-scheme: light)"
+    />
+    <meta
+      name="theme-color"
+      content="#0F172A"
+      media="(prefers-color-scheme: dark)"
+    />
     <title>NoServer.ai - On-device Web Summarizer</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" crossorigin="anonymous" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+      crossorigin="anonymous"
+    />
   </head>
   <body>
     <header class="panel-header" role="banner">
@@ -15,26 +27,124 @@
     </header>
 
     <main class="panel-main" role="main">
+      <section
+        id="modelSelectSection"
+        class="model-select-section"
+        aria-label="AI 모델 선택"
+      >
+        <label for="model-select" class="model-select-label">모델</label>
+        <ol
+          id="model-onboarding-steps"
+          class="model-onboarding-steps"
+          aria-label="모델 설정 순서"
+        >
+          <li><span class="step-num" aria-hidden="true">1</span> 모델 선택</li>
+          <li>
+            <span class="step-num" aria-hidden="true">2</span> 모델 다운로드
+          </li>
+        </ol>
+        <select
+          id="model-select"
+          class="model-select"
+          aria-describedby="model-select-hint"
+        >
+          <option value="">로딩 중…</option>
+        </select>
+        <button
+          type="button"
+          id="model-download-button"
+          class="btn-download-primary"
+          aria-label="선택한 모델 다운로드"
+        >
+          <i class="fa fa-download" aria-hidden="true"></i>
+          <span>모델 다운로드</span>
+        </button>
+      </section>
       <section id="inputContainer" class="input-section" aria-label="요약 실행">
-        <button type="button" id="extract-button" class="btn-primary" aria-label="현재 페이지 요약하기">
+        <button
+          type="button"
+          id="extract-button"
+          class="btn-primary"
+          aria-label="현재 페이지 요약하기"
+        >
           <i class="fa fa-file-lines" aria-hidden="true"></i>
           <span>페이지 요약하기</span>
         </button>
       </section>
 
-      <section id="loadingContainerWrapper" class="loading-section" aria-live="polite" aria-busy="true">
-        <p id="model-status-text" class="model-status-text">AI 모델 준비 중입니다…</p>
-        <div id="loadingContainer" class="loading-bar-container" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+      <section
+        id="currentOperation"
+        class="current-operation"
+        aria-live="polite"
+        aria-label="현재 작업 상태"
+        aria-hidden="true"
+      >
+        <div
+          id="operationModel"
+          class="operation-pane operation-model"
+          aria-hidden="true"
+        >
+          <p id="model-status-text" class="model-status-text">
+            AI 모델 준비 중입니다…
+          </p>
+          <div
+            id="loadingContainer"
+            class="loading-bar-container"
+            role="progressbar"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+          ></div>
+        </div>
+        <div
+          id="operationSummary"
+          class="operation-pane operation-summary"
+          aria-hidden="true"
+        >
+          <div
+            id="loading-indicator"
+            class="loading-dots"
+            aria-hidden="true"
+          ></div>
+          <p
+            id="global-step-message"
+            class="global-step-message"
+            aria-live="polite"
+            aria-atomic="true"
+          ></p>
+        </div>
       </section>
 
-      <section id="stage" class="stage-section" aria-hidden="true">
-        <div id="loading-indicator" class="loading-dots" aria-hidden="true"></div>
-      </section>
-
-      <section id="historyWrapper" class="history-section" aria-label="요약 히스토리">
+      <section
+        id="historyWrapper"
+        class="history-section"
+        aria-label="요약 히스토리"
+      >
         <!-- 요약 히스토리 카드들이 여기에 추가됨 -->
       </section>
     </main>
+
+    <div
+      id="delete-modal-backdrop"
+      class="delete-modal-backdrop"
+      aria-hidden="true"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="delete-modal-title"
+    >
+      <div class="delete-modal">
+        <h2 id="delete-modal-title" class="delete-modal-title">요약 삭제</h2>
+        <p class="delete-modal-text">이 요약을 삭제하시겠습니까?</p>
+        <div class="delete-modal-actions">
+          <button type="button" id="delete-modal-cancel" class="btn-secondary">
+            취소
+          </button>
+          <button type="button" id="delete-modal-confirm" class="btn-danger">
+            삭제
+          </button>
+        </div>
+      </div>
+    </div>
 
     <script type="module" src="./sidepanel.ts"></script>
   </body>

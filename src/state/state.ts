@@ -2,11 +2,17 @@ import type { SummaryItem } from "../types";
 import { ServiceWorkerAPI } from "../sw/serviceWorkerAPI";
 
 let localHistory: (SummaryItem & { partialSummary?: string })[] = [];
+/** O(1) lookup by id for setPartialSummary (streaming updates). */
+let historyById = new Map<string, SummaryItem & { partialSummary?: string }>();
 let currentRequestId = 0;
 let activeSummaryRequests = new Map<string, SummaryItem>();
 let onHistoryChanged: (() => void) | null = null;
 /** Called when only one item's partial summary text changes (streaming) to avoid full re-render. */
 let onPartialSummaryUpdated: ((itemId: string, partial: string) => void) | null = null;
+
+function syncHistoryById() {
+  historyById = new Map(localHistory.map((item) => [item.id, item]));
+}
 
 export function getLocalHistory() {
   return localHistory;
@@ -29,6 +35,7 @@ export function setOnPartialSummaryUpdated(cb: (itemId: string, partial: string)
 
 export async function refreshLocalHistory(maxItems: number) {
   localHistory = (await ServiceWorkerAPI.getHistory(maxItems)) as (SummaryItem & { partialSummary?: string })[];
+  syncHistoryById();
   if (onHistoryChanged) onHistoryChanged();
 }
 
@@ -55,7 +62,7 @@ export async function deleteSummary(id: string, maxItems: number) {
 }
 
 export function setPartialSummary(itemId: string, partial: string) {
-  const item = localHistory.find((item) => item.id === itemId);
+  const item = historyById.get(itemId);
   if (item) {
     item.partialSummary = partial;
     if (onPartialSummaryUpdated) {
