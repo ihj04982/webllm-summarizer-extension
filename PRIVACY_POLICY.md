@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**WebLLM Summarizer** (“the extension”) is committed to protecting your privacy. This policy explains what information is collected, how it is used, and your choices regarding your information.
+**NoServer.ai** (“the extension”) is committed to protecting your privacy. This policy explains what information is collected, how it is used, and your choices regarding your information.
 
 ## 1. Information Collection
 
