@@ -23,7 +23,6 @@ function safeHref(url: string): string {
 
 let progressBar: InstanceType<typeof Line> | null = null;
 
-/** Cached to avoid repeated getElementById in showModelProgress/hideModelProgress. */
 let cachedOperationEls: {
   root: HTMLElement | null;
   model: HTMLElement | null;
@@ -41,9 +40,7 @@ function getCurrentOperationEls() {
   return cachedOperationEls;
 }
 
-export { normalizeNewlines };
-
-/** 모델 다운로드 진행 시 현재 작업 영역에 "모델 다운로드" 표시 */
+/** 모델 다운로드/로드 진행 시 현재 작업 영역에 모델 패널 표시 */
 export function showModelProgress() {
   const { root, model, summary } = getCurrentOperationEls();
   if (root) {
@@ -54,7 +51,7 @@ export function showModelProgress() {
   if (summary) summary.setAttribute("aria-hidden", "true");
 }
 
-/** 모델 다운로드 완료 후 현재 작업 영역에서 모델 패널 숨김 */
+/** 모델 로드 완료 후 현재 작업 영역에서 모델 패널 숨김 */
 export function hideModelProgress() {
   const { root, model, summary } = getCurrentOperationEls();
   if (model) model.setAttribute("aria-hidden", "true");
@@ -65,18 +62,8 @@ export function hideModelProgress() {
   }
 }
 
-export function hideLoadingState(_loadingContainerWrapper?: HTMLElement) {
-  const loadingDiv = document.getElementById("initial-loading");
-  if (loadingDiv) loadingDiv.remove();
-  hideModelProgress();
-}
-
-/** 모델 다운로드 시 현재 작업 영역 표시 (기존 showLoadingState 대체) */
-export function showLoadingState(loadingContainerWrapper?: HTMLElement) {
-  if (loadingContainerWrapper) {
-    loadingContainerWrapper.style.display = "flex";
-    loadingContainerWrapper.setAttribute("aria-busy", "true");
-  }
+/** 모델 다운로드/로드 시 현재 작업 영역 표시 */
+export function showLoadingState() {
   showModelProgress();
 }
 
@@ -121,17 +108,21 @@ export function setProgressBar(progress: number) {
 
 let cachedModelStatusText: HTMLElement | null = null;
 
-export function renderModelStatusText(progress: number) {
+export function setModelStatusText(text: string) {
   if (!cachedModelStatusText) cachedModelStatusText = document.getElementById("model-status-text");
-  const statusText = cachedModelStatusText;
-  if (statusText) {
-    if (progress >= 1.0) {
-      statusText.textContent = "AI 모델 준비 완료!";
-      hideModelProgress();
-    } else {
-      const percent = Math.round(progress * 100);
-      statusText.textContent = `AI 모델 다운로드 중… (${percent}%)`;
-    }
+  if (cachedModelStatusText) cachedModelStatusText.textContent = text;
+}
+
+/** @param fromCache true면 디스크 캐시에서 로드 중 (다운로드 아님) */
+export function renderModelStatusText(progress: number, fromCache = false) {
+  if (progress >= 1.0) {
+    setModelStatusText("AI 모델 준비 완료!");
+    hideModelProgress();
+  } else {
+    const percent = Math.round(progress * 100);
+    setModelStatusText(
+      fromCache ? `저장된 모델 불러오는 중… (${percent}%)` : `AI 모델 다운로드 중… (${percent}%)`
+    );
   }
 }
 
@@ -140,7 +131,7 @@ export function setExtractButtonEnabled(enabled: boolean) {
   if (extractButton) extractButton.disabled = !enabled;
 }
 
-/** 진행 메시지: 카드 한 곳에만 표시. 전역 스트립은 사용하지 않음(모델 다운로드 시에만 스트립 사용). */
+/** 진행 메시지: 진행 중인 카드의 배지에 표시 */
 export function setGlobalStepMessage(text: string | null, inProgressItemId?: string) {
   setCardStepMessage(text ? (inProgressItemId ?? null) : null, text);
 }
@@ -200,11 +191,8 @@ export function renderHistory(
     let summaryHtml = "";
     if (item.status === "error") {
       summaryHtml = `<div class="summary-error">${escapeHtml(item.error || "오류")}</div>`;
-    } else if (item.partialSummary) {
-      const raw = normalizeNewlines(cleanThinkTags(item.partialSummary)).trim();
-      summaryHtml = escapeHtml(raw).replace(/\n/g, "<br>");
     } else {
-      const raw = normalizeNewlines(cleanThinkTags(item.summary)).trim();
+      const raw = normalizeNewlines(cleanThinkTags(item.partialSummary || item.summary)).trim();
       summaryHtml = escapeHtml(raw).replace(/\n/g, "<br>");
     }
 
@@ -259,41 +247,10 @@ export function renderHistory(
   historyWrapper.appendChild(fragment);
 }
 
-export function renderHistoryPanel(
-  history: (SummaryItem & { partialSummary?: string })[],
-  historyWrapper: HTMLElement,
-  setupCardEventListeners: (card: Element, item: SummaryItem) => void,
-  isSummarizing: boolean
-) {
-  renderHistory(history, historyWrapper, setupCardEventListeners, isSummarizing);
-}
-
-export type UpdateUIData = { loading: boolean } | { show: boolean };
-
-export function updateUI(
-  type: "button" | "loading",
-  data: UpdateUIData,
-  extractButton: HTMLElement,
-  loadingIndicator: HTMLElement
-) {
-  switch (type) {
-    case "button": {
-      const btn = extractButton as HTMLButtonElement;
-      if ("loading" in data) {
-        btn.disabled = data.loading;
-      }
-      const span = btn.querySelector("span");
-      if (span) span.textContent = "페이지 요약하기";
-      else btn.innerText = "페이지 요약하기";
-      break;
-    }
-    case "loading": {
-      if ("show" in data) {
-        loadingIndicator.style.display = data.show ? "block" : "none";
-      }
-      break;
-    }
-  }
+/** 추출/요약 진행 중 로딩 인디케이터 표시 토글 */
+export function setExtractLoading(loading: boolean) {
+  const indicator = document.getElementById("loading-indicator");
+  if (indicator) indicator.style.display = loading ? "block" : "none";
 }
 
 export function showToast(message: string, type: "error" | "info" | "success" = "info", durationMs = 3000) {
@@ -345,65 +302,15 @@ export function confirmDeleteModal() {
   hideDeleteModal();
 }
 
-export function updateSummaryInPlace(
-  itemId: string,
-  partialSummary: string,
-  setPartialSummary: (id: string, summary: string) => void,
-  cleanThinkTags: (str: string) => string
-) {
-  setPartialSummary(itemId, cleanThinkTags(normalizeNewlines(partialSummary)));
-}
-
 /**
- * Updates only the summary text of one card (by data-id). Use during streaming to avoid
- * full history re-render and layout thrashing.
+ * 한 카드의 요약 텍스트만 갱신 (data-id 기준). 스트리밍 중 전체 리렌더로 인한
+ * 레이아웃 출렁임을 방지한다.
  */
-export function updateSummaryCardContent(
-  historyWrapper: HTMLElement,
-  itemId: string,
-  partialSummary: string,
-  cleanThinkTags: (str: string) => string
-) {
+export function updateSummaryCardContent(historyWrapper: HTMLElement, itemId: string, partialSummary: string) {
   const card = historyWrapper.querySelector(`[data-id="${CSS.escape(itemId)}"]`);
   const summaryEl = card?.querySelector<HTMLElement>(".summary-text");
   if (summaryEl) {
     const raw = normalizeNewlines(cleanThinkTags(partialSummary)).trim();
     summaryEl.innerHTML = escapeHtml(raw).replace(/\n/g, "<br>");
   }
-}
-
-export async function finalizeSummary(
-  itemId: string,
-  finalSummary: string,
-  stateUpdateSummary: (
-    id: string,
-    summary: string,
-    status: string,
-    error: string | undefined,
-    maxItems: number
-  ) => Promise<void>,
-  refreshLocalHistory: (maxItems: number) => Promise<void>,
-  cleanThinkTags: (str: string) => string,
-  MAX_HISTORY_ITEMS: number
-) {
-  const cleanedSummary = cleanThinkTags(finalSummary);
-  await stateUpdateSummary(itemId, cleanedSummary, "done", undefined, MAX_HISTORY_ITEMS);
-  await refreshLocalHistory(MAX_HISTORY_ITEMS);
-}
-
-export async function handleSummaryError(
-  itemId: string,
-  error: string,
-  stateUpdateSummary: (
-    id: string,
-    summary: string,
-    status: string,
-    error: string | undefined,
-    maxItems: number
-  ) => Promise<void>,
-  refreshLocalHistory: (maxItems: number) => Promise<void>,
-  MAX_HISTORY_ITEMS: number
-) {
-  await stateUpdateSummary(itemId, `요약 중 오류가 발생했습니다: ${error}`, "error", error, MAX_HISTORY_ITEMS);
-  await refreshLocalHistory(MAX_HISTORY_ITEMS);
 }

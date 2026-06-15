@@ -1,109 +1,75 @@
-import type { SummaryItem } from "../types";
+import type { SummaryItem, SummaryStatus } from "../types";
 
-export class ServiceWorkerAPI {
-  private static async sendMessage(message: Record<string, unknown>): Promise<unknown> {
-    let attempt = 0;
-    const maxAttempts = 2;
-    while (attempt < maxAttempts) {
-      try {
-        return await new Promise((resolve, reject) => {
-          chrome.runtime.sendMessage(message, (response) => {
-            if (chrome.runtime.lastError) {
-              if (attempt + 1 < maxAttempts) {
-                attempt++;
-                setTimeout(() => {
-                  // 재시도
-                  this.sendMessage(message).then(resolve).catch(reject);
-                }, 200);
-                return;
-              }
-              console.error("Chrome runtime error:", chrome.runtime.lastError);
-              reject(new Error(chrome.runtime.lastError.message));
-              return;
-            }
-            if (!response) {
-              console.warn("No response from service worker for:", (message as { type?: string }).type);
-              resolve({});
-              return;
-            }
-            resolve(response);
-          });
-        });
-      } catch (error) {
-        if (attempt + 1 < maxAttempts) {
-          attempt++;
-          continue;
+/** 서비스워커로 메시지 전송. 일시적 오류(SW 재기동 등) 시 1회 재시도. */
+async function sendMessage<T>(message: Record<string, unknown>): Promise<T> {
+  const send = () =>
+    new Promise<T>((resolve, reject) => {
+      chrome.runtime.sendMessage(message, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else {
+          resolve((response ?? {}) as T);
         }
-        throw error;
-      }
-    }
-  }
+      });
+    });
 
-  static async getHistory(limit?: number): Promise<SummaryItem[]> {
+  try {
+    return await send();
+  } catch {
+    await new Promise((r) => setTimeout(r, 200));
+    return send();
+  }
+}
+
+export const ServiceWorkerAPI = {
+  async getHistory(limit?: number): Promise<SummaryItem[]> {
     try {
-      const response = (await this.sendMessage({ type: "GET_HISTORY", limit })) as { history?: SummaryItem[] };
-      return response.history || [];
+      const res = await sendMessage<{ history?: SummaryItem[] }>({ type: "GET_HISTORY", limit });
+      return res.history ?? [];
     } catch (error) {
       console.error("Failed to get history:", error);
       return [];
     }
-  }
+  },
 
-  static async addSummaryItem(item: Omit<SummaryItem, "id">, limit: number): Promise<SummaryItem> {
+  async addSummaryItem(item: Omit<SummaryItem, "id">): Promise<SummaryItem> {
+    const res = await sendMessage<{ item?: SummaryItem }>({ type: "ADD_SUMMARY_ITEM", item });
+    if (!res.item) throw new Error("Failed to add summary item");
+    return res.item;
+  },
+
+  async updateSummary(id: string, summary: string, status: SummaryStatus, error?: string | null): Promise<void> {
     try {
-      const response = (await this.sendMessage({ type: "ADD_SUMMARY_ITEM", item, limit })) as { item?: SummaryItem };
-      if (!response.item) {
-        throw new Error("Failed to add summary item - no item in response");
-      }
-      return response.item;
-    } catch (error) {
-      console.error("Failed to add summary item:", error);
-      return {
-        ...item,
-        id: "temp_" + Date.now().toString(),
-      } as SummaryItem;
+      await sendMessage({ type: "UPDATE_SUMMARY", id, summary, status, error });
+    } catch (e) {
+      console.error("Failed to update summary:", e);
     }
-  }
+  },
 
-  static async updateSummary(
-    id: string,
-    summary: string,
-    status: string,
-    error: string | undefined,
-    limit: number
-  ): Promise<void> {
+  async deleteSummary(id: string): Promise<boolean> {
     try {
-      await this.sendMessage({ type: "UPDATE_SUMMARY", id, summary, status, error, limit });
-    } catch (error) {
-      console.error("Failed to update summary:", error);
-    }
-  }
-
-  static async getCachedSummary(contentHash: string): Promise<string | null> {
-    try {
-      const response = (await this.sendMessage({ type: "GET_CACHED_SUMMARY", contentHash })) as { cached?: string };
-      return response.cached || null;
-    } catch (error) {
-      console.error("Failed to get cached summary:", error);
-      return null;
-    }
-  }
-
-  static async setCachedSummary(contentHash: string, summary: string): Promise<void> {
-    try {
-      await this.sendMessage({ type: "SET_CACHED_SUMMARY", contentHash, summary });
-    } catch (error) {
-      console.error("Failed to set cached summary:", error);
-    }
-  }
-
-  static async deleteSummary(id: string, limit: number): Promise<boolean> {
-    try {
-      const response = (await this.sendMessage({ type: "DELETE_SUMMARY", id, limit })) as { success?: boolean };
-      return response.success || false;
+      const res = await sendMessage<{ success?: boolean }>({ type: "DELETE_SUMMARY", id });
+      return res.success ?? false;
     } catch (error) {
       console.error("Failed to delete summary:", error);
       return false;
     }
-  }
-}
+  },
+
+  async getLoadedModelId(): Promise<string | null> {
+    try {
+      const res = await sendMessage<{ modelId?: string | null }>({ type: "GET_LOADED_MODEL" });
+      return res.modelId ?? null;
+    } catch {
+      return null;
+    }
+  },
+
+  notifyModelLoaded(modelId: string) {
+    sendMessage({ type: "MODEL_LOADED", modelId }).catch(() => {});
+  },
+
+  notifyModelUnloaded() {
+    sendMessage({ type: "MODEL_UNLOADED" }).catch(() => {});
+  },
+};

@@ -12,9 +12,7 @@ export function setupCardEventListeners(
   onStop?: () => void
 ) {
   const contentBody = card.querySelector<HTMLElement>(".content-body");
-  const toggleBtn = card.querySelector<HTMLButtonElement>(
-    ".content-title .toggle-button"
-  );
+  const toggleBtn = card.querySelector<HTMLButtonElement>(".content-title .toggle-button");
   const contentDiv = card.querySelector<HTMLElement>(".content-text");
   if (toggleBtn && contentBody && contentDiv) {
     toggleBtn.addEventListener("click", () => {
@@ -29,9 +27,7 @@ export function setupCardEventListeners(
   const copyBtn = card.querySelector<HTMLButtonElement>(".copy-button");
   if (copyBtn) {
     copyBtn.addEventListener("click", () => {
-      const cleanedSummary = normalizeNewlines(
-        cleanThinkTags(item.summary)
-      ).trim();
+      const cleanedSummary = normalizeNewlines(cleanThinkTags(item.summary)).trim();
       const formattedText = `${cleanedSummary}\n\n출처: ${item.title.trim()}\n${item.url.trim()}`;
       navigator.clipboard
         .writeText(formattedText)
@@ -63,37 +59,4 @@ export function setupCardEventListeners(
       onRetry(item);
     });
   }
-}
-
-interface AppEventHandlers {
-  onExtract: () => void;
-  onDelete: (item: SummaryItem) => void;
-  onRetry: (item: SummaryItem) => void;
-  onModelLoadProgress?: (progress: number) => void;
-  onHistoryChanged?: () => void;
-}
-
-export function bindAppEvents(handlers: AppEventHandlers) {
-  const extractButton = document.getElementById(
-    "extract-button"
-  ) as HTMLButtonElement;
-  if (extractButton) {
-    extractButton.addEventListener("click", handlers.onExtract);
-  }
-
-  // Do not release model on panel close so reopening the sidepanel can reuse it
-  // without re-downloading. Use RELEASE_RESOURCES only for explicit unload if needed.
-
-  document.addEventListener("DOMContentLoaded", () => {
-    if (handlers.onHistoryChanged) handlers.onHistoryChanged();
-  });
-
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (
-      message.type === "MODEL_LOAD_PROGRESS" &&
-      handlers.onModelLoadProgress
-    ) {
-      handlers.onModelLoadProgress(message.progress);
-    }
-  });
 }

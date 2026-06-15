@@ -18,4 +18,10 @@ Thumbs.db
 # 기타
 npm-debug.log*
 yarn-debug.log*
-yarn-error.log* 
+yarn-error.log*
+
+# 확장 패키지 빌드물
+*.zip
+
+# 툴 상태
+.omc/ 

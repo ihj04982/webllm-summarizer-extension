@@ -4,7 +4,10 @@
   "description": "",
   "private": true,
   "scripts": {
-    "build": "parcel build src/background.ts src/content.ts src/sidepanel.html && powershell Copy-Item src\\manifest.json dist\\manifest.json; Copy-Item -Recurse -Force src\\icons dist\\icons"
+    "build": "parcel build src/background.ts src/content.ts src/sidepanel.html && powershell -Command \"Copy-Item src/manifest.json dist/manifest.json -Force; Remove-Item -Recurse -Force dist/icons -ErrorAction SilentlyContinue; Copy-Item -Recurse src/icons dist/icons\"",
+    "build:release": "parcel build src/background.ts src/content.ts src/sidepanel.html --no-source-maps && powershell -Command \"Copy-Item src/manifest.json dist/manifest.json -Force; Remove-Item -Recurse -Force dist/icons -ErrorAction SilentlyContinue; Copy-Item -Recurse src/icons dist/icons; Remove-Item dist/*.map -ErrorAction SilentlyContinue\"",
+    "package": "npm run build:release && powershell -Command \"Compress-Archive -Path dist/* -DestinationPath noserver-ai.zip -Force\"",
+    "typecheck": "tsc --noEmit"
   },
   "author": "",
   "license": "ISC",
@@ -16,6 +19,7 @@
     "buffer": "^6.0.3",
     "parcel": "^2.9.3",
     "process": "^0.11.10",
+    "typescript": "^5.5.0",
     "url": "^0.11.1"
   },
   "dependencies": {

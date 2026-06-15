@@ -1,168 +1,100 @@
 import { ExtensionServiceWorkerMLCEngineHandler } from "@mlc-ai/web-llm";
-import { unloadEngine } from "./engine/engineManager";
+import type { SummaryItem, SummaryStatus } from "./types";
 
 // ============================================================================
-// Extension Service Worker for WebLLM Summarizer
-// 역할: ExtensionServiceWorkerMLCEngineHandler + 데이터 관리 + 메시지 라우팅
+// Extension Service Worker
+// 역할: WebLLM 엔진 핸들러 + 요약 히스토리 저장/관리 + 메시지 라우팅
+// 참고: 모델 가중치는 WebLLM이 Cache API(디스크)에 저장하므로 브라우저/PC
+//       재시작 후에도 유지됨. 여기서는 로드 상태(loadedModelId)만 추적.
 // ============================================================================
 
-// 서비스워커 중앙 데이터 관리
-interface SummaryItem {
-  content: string;
-  summary: string;
-  timestamp: string;
-  title: string;
-  url: string;
-  id: string;
-  status: "pending" | "in-progress" | "done" | "error";
-  error?: string | null;
-}
+const MAX_HISTORY_ITEMS = 50;
+const HISTORY_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30일
+
+const VALID_STATUSES: SummaryStatus[] = ["pending", "in-progress", "done", "error"];
 
 class DataManager {
-  private summaryHistory: SummaryItem[] = [];
-  /** O(1) lookup by id for updateSummary; kept in sync with summaryHistory. */
-  private summaryById = new Map<string, SummaryItem>();
-  private summaryCache = new Map<string, string>();
-  private readonly MAX_HISTORY_ITEMS = 50;
-  private readonly MAX_CACHE_SIZE = 100;
+  private history: SummaryItem[] = [];
+  private readonly ready: Promise<void>;
 
-  private rebuildIdMap() {
-    this.summaryById.clear();
-    for (const item of this.summaryHistory) {
-      this.summaryById.set(item.id, item);
+  constructor() {
+    this.ready = this.load();
+  }
+
+  private async load() {
+    const stored = await chrome.storage.local.get("summaryHistory");
+    if (Array.isArray(stored.summaryHistory)) {
+      // 30일 지난 항목 정리 (createdAt 없는 구버전 항목은 유지)
+      const cutoff = Date.now() - HISTORY_TTL_MS;
+      this.history = (stored.summaryHistory as SummaryItem[]).filter(
+        (item) => (item.createdAt ?? Date.now()) > cutoff
+      );
     }
   }
 
-  async init() {
-    const stored = await chrome.storage.local.get(["summaryHistory", "summaryCache"]);
-
-    if (stored.summaryHistory) {
-      this.summaryHistory = stored.summaryHistory;
-      this.rebuildIdMap();
-    }
-
-    if (stored.summaryCache) {
-      this.summaryCache = new Map(stored.summaryCache);
-    }
+  private persist() {
+    return chrome.storage.local.set({ summaryHistory: this.history });
   }
 
-  async addSummary(item: Omit<SummaryItem, "id" | "status" | "error">) {
+  async getHistory(limit?: number): Promise<SummaryItem[]> {
+    await this.ready;
+    return limit ? this.history.slice(0, limit) : [...this.history];
+  }
+
+  async add(item: Omit<SummaryItem, "id" | "status" | "error">): Promise<SummaryItem> {
+    await this.ready;
     const newItem: SummaryItem = {
       ...item,
-      id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 11),
+      createdAt: Date.now(),
       status: "pending",
       error: null,
     };
-
-    this.summaryHistory.unshift(newItem);
-    this.summaryById.set(newItem.id, newItem);
-
-    if (this.summaryHistory.length > this.MAX_HISTORY_ITEMS) {
-      const removed = this.summaryHistory.slice(this.MAX_HISTORY_ITEMS);
-      this.summaryHistory = this.summaryHistory.slice(0, this.MAX_HISTORY_ITEMS);
-      for (const item of removed) this.summaryById.delete(item.id);
-    }
-
-    await this.persistData();
+    this.history.unshift(newItem);
+    this.history = this.history.slice(0, MAX_HISTORY_ITEMS);
+    await this.persist();
     return newItem;
   }
 
-  async updateSummary(
-    id: string,
-    summary: string,
-    status: "pending" | "in-progress" | "done" | "error" = "done",
-    error: string | null = null
-  ) {
-    const item = this.summaryById.get(id);
-    if (item) {
-      item.summary = summary;
-      item.status = status;
-      item.error = error;
-      await this.persistData();
-    }
-  }
-
-  async deleteSummary(id: string) {
-    const item = this.summaryById.get(id);
+  async update(id: string, summary: string, status: SummaryStatus, error: string | null) {
+    await this.ready;
+    const item = this.history.find((i) => i.id === id);
     if (!item) return false;
-    const index = this.summaryHistory.indexOf(item);
-    if (index !== -1) {
-      this.summaryHistory.splice(index, 1);
-      this.summaryById.delete(id);
-      await this.persistData();
-      return true;
+    item.summary = summary;
+    item.status = status;
+    item.error = error;
+    await this.persist();
+    return true;
+  }
+
+  async delete(id: string): Promise<boolean> {
+    await this.ready;
+    const index = this.history.findIndex((i) => i.id === id);
+    if (index === -1) return false;
+    this.history.splice(index, 1);
+    await this.persist();
+    return true;
+  }
+
+  /** 사이드패널이 닫혔을 때 진행 중이던 요약을 에러 처리 */
+  async markInProgressAsError(message: string) {
+    await this.ready;
+    let changed = false;
+    for (const item of this.history) {
+      if (item.status === "in-progress") {
+        item.status = "error";
+        item.error = message;
+        changed = true;
+      }
     }
-    return false;
-  }
-
-  getHistory(limit?: number): SummaryItem[] {
-    return limit ? this.summaryHistory.slice(0, limit) : [...this.summaryHistory];
-  }
-
-  getCachedSummary(contentHash: string): string | null {
-    return this.summaryCache.get(contentHash) || null;
-  }
-
-  setCachedSummary(contentHash: string, summary: string) {
-    this.summaryCache.set(contentHash, summary);
-
-    if (this.summaryCache.size > this.MAX_CACHE_SIZE) {
-      const keysToDelete = Array.from(this.summaryCache.keys()).slice(0, this.summaryCache.size - this.MAX_CACHE_SIZE);
-      keysToDelete.forEach((key) => this.summaryCache.delete(key));
-    }
-
-    this.persistData();
-  }
-
-  private async persistData() {
-    await chrome.storage.local.set({
-      summaryHistory: this.summaryHistory,
-      summaryCache: Array.from(this.summaryCache.entries()),
-    });
-  }
-
-  async cleanup() {
-    const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
-    this.summaryHistory = this.summaryHistory.filter((item) => {
-      const itemTime = new Date(item.timestamp).getTime();
-      return itemTime > thirtyDaysAgo;
-    });
-    this.rebuildIdMap();
-    await this.persistData();
+    if (changed) await this.persist();
   }
 }
-
-// ============================================================================
-// 전역 변수 및 초기화
-// ============================================================================
 
 const dataManager = new DataManager();
-let isInitialized = false;
-
-async function initializeServiceWorker() {
-  if (!isInitialized) {
-    await dataManager.init();
-    isInitialized = true;
-  }
-}
 
 // ============================================================================
-// 서비스워커 생명주기 이벤트
-// ============================================================================
-
-chrome.runtime.onStartup.addListener(async () => {
-  await initializeServiceWorker();
-});
-
-chrome.runtime.onInstalled.addListener(async () => {
-  await initializeServiceWorker();
-});
-
-// 즉시 초기화
-initializeServiceWorker().catch(console.error);
-
-// ============================================================================
-// 입력 검증 (메시지 페이로드)
+// 메시지 라우팅 (sidepanel ↔ service worker)
 // ============================================================================
 
 function isSummaryItemPayload(item: unknown): item is Omit<SummaryItem, "id" | "status" | "error"> {
@@ -177,202 +109,92 @@ function isSummaryItemPayload(item: unknown): item is Omit<SummaryItem, "id" | "
   );
 }
 
-function isNonEmptyString(v: unknown): v is string {
-  return typeof v === "string" && v.length > 0;
-}
-
-// ============================================================================
-// 데이터 관리 메시지 핸들러
-// ============================================================================
-
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+async function handleMessage(message: Record<string, unknown>): Promise<unknown> {
   switch (message.type) {
-    case "PING":
-      sendResponse({ success: true });
-      break;
-
     case "GET_HISTORY": {
-      const limit = message.limit !== undefined ? Number(message.limit) : undefined;
-      const safeLimit = typeof limit === "number" && limit > 0 && Number.isFinite(limit) ? limit : undefined;
-      const history = dataManager.getHistory(safeLimit);
-      sendResponse({ history });
-      break;
+      const limit = Number(message.limit);
+      const safeLimit = Number.isFinite(limit) && limit > 0 ? limit : undefined;
+      return { history: await dataManager.getHistory(safeLimit) };
     }
 
     case "ADD_SUMMARY_ITEM":
       if (!isSummaryItemPayload(message.item)) {
-        sendResponse({ success: false, error: "Invalid summary item payload" });
-        break;
+        return { success: false, error: "Invalid summary item payload" };
       }
-      dataManager
-        .addSummary(message.item)
-        .then((newItem) => {
-          sendResponse({ success: true, item: newItem });
-          broadcastToSidePanels({ type: "HISTORY_UPDATED", item: newItem });
-        })
-        .catch((error) => {
-          console.error("Error adding summary item:", error);
-          sendResponse({ success: false, error: "Failed to add summary" });
-        });
-      break;
+      return { success: true, item: await dataManager.add(message.item) };
 
-    case "UPDATE_SUMMARY":
-      if (!isNonEmptyString(message.id)) {
-        sendResponse({ success: false, error: "Invalid id" });
-        break;
+    case "UPDATE_SUMMARY": {
+      if (typeof message.id !== "string" || !message.id) {
+        return { success: false, error: "Invalid id" };
       }
       const summary = typeof message.summary === "string" ? message.summary : "";
-      const status = ["pending", "in-progress", "done", "error"].includes(message.status) ? message.status : "done";
-      const err = message.error != null ? String(message.error) : null;
-      dataManager.updateSummary(message.id, summary, status, err).then(() => {
-        sendResponse({ success: true });
-        broadcastToSidePanels({ type: "SUMMARY_UPDATED", id: message.id, summary });
-      });
-      break;
-
-    case "GET_CACHED_SUMMARY":
-      if (typeof message.contentHash !== "string") {
-        sendResponse({ cached: null });
-        break;
-      }
-      const cached = dataManager.getCachedSummary(message.contentHash);
-      sendResponse({ cached });
-      break;
-
-    case "SET_CACHED_SUMMARY":
-      if (typeof message.contentHash !== "string" || typeof message.summary !== "string") {
-        sendResponse({ success: false });
-        break;
-      }
-      dataManager.setCachedSummary(message.contentHash, message.summary);
-      sendResponse({ success: true });
-      break;
+      const status = VALID_STATUSES.includes(message.status as SummaryStatus)
+        ? (message.status as SummaryStatus)
+        : "done";
+      const error = message.error != null ? String(message.error) : null;
+      return { success: await dataManager.update(message.id, summary, status, error) };
+    }
 
     case "DELETE_SUMMARY":
-      if (!isNonEmptyString(message.id)) {
-        sendResponse({ success: false });
-        break;
-      }
-      dataManager.deleteSummary(message.id).then((success) => {
-        sendResponse({ success });
-        if (success) {
-          broadcastToSidePanels({ type: "SUMMARY_DELETED", id: message.id });
-        }
-      });
-      break;
-
-    case "CLEANUP":
-      dataManager.cleanup().then(() => {
-        sendResponse({ success: true });
-      });
-      break;
-
-    case "RELEASE_RESOURCES":
-      try {
-        if (mlcHandler && typeof (mlcHandler as unknown as { dispose?: () => void }).dispose === "function") {
-          (mlcHandler as unknown as { dispose: () => void }).dispose();
-        }
-        unloadEngine().catch(console.error);
-        currentLoadedModelId = null;
-        sendResponse({ success: true });
-      } catch (error) {
-        console.error("Error disposing WebLLM handler:", error);
-        sendResponse({ success: false, error: (error as Error).message });
-      } finally {
-        mlcHandler = undefined;
-      }
-      break;
+      if (typeof message.id !== "string" || !message.id) return { success: false };
+      return { success: await dataManager.delete(message.id) };
 
     case "MODEL_LOADED":
-      currentLoadedModelId = isNonEmptyString(message.modelId) ? message.modelId : null;
-      sendResponse({ success: true });
-      break;
+      loadedModelId = typeof message.modelId === "string" && message.modelId ? message.modelId : null;
+      return { success: true };
 
     case "MODEL_UNLOADED":
-      currentLoadedModelId = null;
-      sendResponse({ success: true });
-      break;
+      loadedModelId = null;
+      return { success: true };
 
     case "GET_LOADED_MODEL":
-      sendResponse({ modelId: currentLoadedModelId });
-      break;
-
-    case "MODEL_LOAD_PROGRESS": {
-      const progress = typeof message.progress === "number" && Number.isFinite(message.progress) ? message.progress : 0;
-      chrome.runtime.sendMessage({ type: "MODEL_LOAD_PROGRESS", progress });
-      sendResponse({ success: true });
-      break;
-    }
+      return { modelId: loadedModelId };
 
     default:
       console.warn("Unknown message type:", message.type);
-      sendResponse({ success: false, error: "Unknown message type" });
-      break;
-  }
-  return true;
-});
-
-// ============================================================================
-// 유틸리티 함수
-// ============================================================================
-
-async function broadcastToSidePanels(message: Record<string, unknown>) {
-  try {
-    const tabs = await chrome.tabs.query({});
-    tabs.forEach((tab) => {
-      if (tab.id) {
-        chrome.tabs.sendMessage(tab.id, message).catch(() => {
-          // 사이드패널이 없는 탭은 무시 (정상적인 동작)
-        });
-      }
-    });
-  } catch (error) {
-    console.error("Failed to broadcast message:", error);
+      return { success: false, error: "Unknown message type" };
   }
 }
 
-// 주기적 데이터 정리 (1시간마다)
-setInterval(() => {
-  dataManager.cleanup();
-}, 60 * 60 * 1000);
-
-// 확장 프로그램 아이콘 클릭 시 사이드패널 열기
-chrome.action.onClicked.addListener((tab: chrome.tabs.Tab) => {
-  if (tab.windowId) {
-    // @ts-expect-error: Chrome API 타입 정의 문제로 인한 우회
-    chrome.sidePanel.open({ windowId: tab.windowId });
-    console.log("Side panel opened for window:", tab.windowId);
-  } else {
-    console.error("No window ID found for tab");
-  }
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  handleMessage(message)
+    .then(sendResponse)
+    .catch((error) => {
+      console.error("[background] message error:", message?.type, error);
+      sendResponse({ success: false, error: error instanceof Error ? error.message : String(error) });
+    });
+  return true; // 비동기 응답
 });
 
+// ============================================================================
+// WebLLM 엔진 핸들러 (sidepanel의 MLCEngine 클라이언트와 포트로 연결)
+// ============================================================================
+
 let mlcHandler: ExtensionServiceWorkerMLCEngineHandler | undefined;
-/** Model ID currently loaded in the service worker (survives sidepanel close). */
-let currentLoadedModelId: string | null = null;
+/** 서비스워커(메모리)에 현재 로드된 모델 ID — 사이드패널을 닫아도 유지됨 */
+let loadedModelId: string | null = null;
 
-chrome.runtime.onConnect.addListener(function (port) {
-  console.assert(port.name === "web_llm_service_worker");
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "web_llm_service_worker") return;
 
-  if (mlcHandler === undefined) {
+  if (!mlcHandler) {
     mlcHandler = new ExtensionServiceWorkerMLCEngineHandler(port);
   } else {
     mlcHandler.setPort(port);
   }
-
   port.onMessage.addListener(mlcHandler.onmessage.bind(mlcHandler));
 
-  port.onDisconnect.addListener(async () => {
-    try {
-      const inProgressItems = dataManager.getHistory().filter((item) => item.status === "in-progress");
-      for (const item of inProgressItems) {
-        await dataManager.updateSummary(item.id, item.summary, "error", "요약 중 에러 발생");
-      }
-      // Do NOT dispose the handler or unload the engine when the sidepanel closes.
-      // Keeping the model in memory allows reuse when the user reopens the sidepanel
-      // without re-downloading. The handler will get the new port via setPort() on reconnect.
-    } catch (error) {
-      console.error("Error on sidepanel disconnect:", error);
-    }
+  port.onDisconnect.addListener(() => {
+    // 사이드패널이 닫히면 진행 중이던 요약만 에러 처리.
+    // 엔진은 unload하지 않음 — 패널을 다시 열면 재다운로드 없이 즉시 재사용.
+    dataManager.markInProgressAsError("사이드패널이 닫혀 요약이 중단되었습니다").catch(console.error);
   });
+});
+
+// 확장 프로그램 아이콘 클릭 시 사이드패널 열기
+chrome.action.onClicked.addListener((tab) => {
+  if (tab.windowId !== undefined) {
+    // @types/chrome 구버전에 sidePanel.open 타입이 없어 캐스팅
+    (chrome.sidePanel as unknown as { open: (opts: { windowId: number }) => void }).open({ windowId: tab.windowId });
+  }
 });

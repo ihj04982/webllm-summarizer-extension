@@ -1,74 +1,53 @@
-import type { SummaryItem } from "../types";
+import type { SummaryItem, SummaryStatus } from "../types";
 import { ServiceWorkerAPI } from "../sw/serviceWorkerAPI";
 
-let localHistory: (SummaryItem & { partialSummary?: string })[] = [];
-/** O(1) lookup by id for setPartialSummary (streaming updates). */
-let historyById = new Map<string, SummaryItem & { partialSummary?: string }>();
-let currentRequestId = 0;
-let activeSummaryRequests = new Map<string, SummaryItem>();
+/** 사이드패널에 표시할 최대 히스토리 개수 */
+export const MAX_HISTORY_ITEMS = 20;
+
+export type HistoryItem = SummaryItem & { partialSummary?: string };
+
+let localHistory: HistoryItem[] = [];
 let onHistoryChanged: (() => void) | null = null;
-/** Called when only one item's partial summary text changes (streaming) to avoid full re-render. */
+/** 스트리밍 중 한 항목의 부분 요약만 바뀔 때 호출 (전체 리렌더 방지) */
 let onPartialSummaryUpdated: ((itemId: string, partial: string) => void) | null = null;
 
-function syncHistoryById() {
-  historyById = new Map(localHistory.map((item) => [item.id, item]));
-}
-
-export function getLocalHistory() {
+export function getLocalHistory(): HistoryItem[] {
   return localHistory;
 }
-export function getCurrentRequestId() {
-  return currentRequestId;
-}
-export function nextRequestId() {
-  return ++currentRequestId;
-}
-export function getActiveSummaryRequests() {
-  return activeSummaryRequests;
-}
+
 export function setOnHistoryChanged(cb: () => void) {
   onHistoryChanged = cb;
 }
+
 export function setOnPartialSummaryUpdated(cb: (itemId: string, partial: string) => void) {
   onPartialSummaryUpdated = cb;
 }
 
-export async function refreshLocalHistory(maxItems: number) {
-  localHistory = (await ServiceWorkerAPI.getHistory(maxItems)) as (SummaryItem & { partialSummary?: string })[];
-  syncHistoryById();
-  if (onHistoryChanged) onHistoryChanged();
+export async function refreshLocalHistory() {
+  localHistory = (await ServiceWorkerAPI.getHistory(MAX_HISTORY_ITEMS)) as HistoryItem[];
+  onHistoryChanged?.();
 }
 
-export async function addSummaryItem(item: Omit<SummaryItem, "id">, maxItems: number): Promise<SummaryItem> {
-  const newItem = (await ServiceWorkerAPI.addSummaryItem(item, maxItems)) as SummaryItem;
-  await refreshLocalHistory(maxItems);
+export async function addSummaryItem(item: Omit<SummaryItem, "id">): Promise<SummaryItem> {
+  const newItem = await ServiceWorkerAPI.addSummaryItem(item);
+  await refreshLocalHistory();
   return newItem;
 }
 
-export async function updateSummary(
-  id: string,
-  summary: string,
-  status: string,
-  error: string | undefined,
-  maxItems: number
-) {
-  await ServiceWorkerAPI.updateSummary(id, summary, status, error, maxItems);
-  await refreshLocalHistory(maxItems);
+export async function updateSummary(id: string, summary: string, status: SummaryStatus, error?: string | null) {
+  await ServiceWorkerAPI.updateSummary(id, summary, status, error);
+  await refreshLocalHistory();
 }
 
-export async function deleteSummary(id: string, maxItems: number) {
-  await ServiceWorkerAPI.deleteSummary(id, maxItems);
-  await refreshLocalHistory(maxItems);
+export async function deleteSummary(id: string) {
+  await ServiceWorkerAPI.deleteSummary(id);
+  await refreshLocalHistory();
 }
 
 export function setPartialSummary(itemId: string, partial: string) {
-  const item = historyById.get(itemId);
-  if (item) {
-    item.partialSummary = partial;
-    if (onPartialSummaryUpdated) {
-      onPartialSummaryUpdated(itemId, partial);
-    } else if (onHistoryChanged) {
-      onHistoryChanged();
-    }
-  }
+  const item = localHistory.find((i) => i.id === itemId);
+  if (!item) return;
+  item.partialSummary = partial;
+  if (onPartialSummaryUpdated) onPartialSummaryUpdated(itemId, partial);
+  else onHistoryChanged?.();
 }
