@@ -2,7 +2,6 @@
 
 import type { SummaryItem } from "../types";
 import { cleanThinkTags, normalizeNewlines } from "../utils/text";
-import { Line } from "progressbar.js";
 
 /** Escape HTML to prevent XSS when inserting untrusted data into innerHTML. */
 function escapeHtml(str: string): string {
@@ -21,42 +20,21 @@ function safeHref(url: string): string {
   return "#";
 }
 
-let progressBar: InstanceType<typeof Line> | null = null;
-
-let cachedOperationEls: {
-  root: HTMLElement | null;
-  model: HTMLElement | null;
-  summary: HTMLElement | null;
-} | null = null;
-
-function getCurrentOperationEls() {
-  if (!cachedOperationEls) {
-    cachedOperationEls = {
-      root: document.getElementById("currentOperation"),
-      model: document.getElementById("operationModel"),
-      summary: document.getElementById("operationSummary"),
-    };
-  }
-  return cachedOperationEls;
-}
-
 /** 모델 다운로드/로드 진행 시 현재 작업 영역에 모델 패널 표시 */
-export function showModelProgress() {
-  const { root, model, summary } = getCurrentOperationEls();
+function showModelProgress() {
+  const root = document.getElementById("currentOperation");
   if (root) {
     root.setAttribute("aria-hidden", "false");
     root.setAttribute("aria-busy", "true");
   }
-  if (model) model.setAttribute("aria-hidden", "false");
-  if (summary) summary.setAttribute("aria-hidden", "true");
+  document.getElementById("operationModel")?.setAttribute("aria-hidden", "false");
 }
 
-/** 모델 로드 완료 후 현재 작업 영역에서 모델 패널 숨김 */
-export function hideModelProgress() {
-  const { root, model, summary } = getCurrentOperationEls();
-  if (model) model.setAttribute("aria-hidden", "true");
-  const summaryVisible = summary?.getAttribute("aria-hidden") !== "true";
-  if (root && !summaryVisible) {
+/** 모델 로드 완료 후 현재 작업 영역 숨김 */
+function hideModelProgress() {
+  document.getElementById("operationModel")?.setAttribute("aria-hidden", "true");
+  const root = document.getElementById("currentOperation");
+  if (root) {
     root.setAttribute("aria-hidden", "true");
     root.removeAttribute("aria-busy");
   }
@@ -67,50 +45,22 @@ export function showLoadingState() {
   showModelProgress();
 }
 
-let cachedThemeColors: { color: string; trailColor: string } | null = null;
-
-function getThemeColors() {
-  if (!cachedThemeColors) {
-    const style = getComputedStyle(document.documentElement);
-    cachedThemeColors = {
-      color: style.getPropertyValue("--brand-primary").trim() || "#2563EB",
-      trailColor: style.getPropertyValue("--bg-accent").trim() || "#F1F5F9",
-    };
-  }
-  return cachedThemeColors;
-}
-
 export function renderProgressBar(container: HTMLElement) {
-  const { color, trailColor } = getThemeColors();
-  progressBar = new Line(container, {
-    strokeWidth: 4,
-    easing: "easeInOut",
-    duration: 1400,
-    color,
-    trailColor,
-    trailWidth: 1,
-    svgStyle: { width: "100%", height: "100%" },
-  });
-  return progressBar;
+  container.innerHTML = '<div class="loading-bar-fill"></div>';
 }
-
-let cachedLoadingBar: HTMLElement | null = null;
 
 export function setProgressBar(progress: number) {
-  if (progressBar) {
-    progressBar.set(progress);
-  }
-  if (!cachedLoadingBar) cachedLoadingBar = document.getElementById("loadingContainer");
-  if (cachedLoadingBar) {
-    cachedLoadingBar.setAttribute("aria-valuenow", String(Math.round(progress * 100)));
-  }
+  const pct = Math.round(progress * 100);
+  const container = document.getElementById("loadingContainer");
+  if (!container) return;
+  const fill = container.querySelector<HTMLElement>(".loading-bar-fill");
+  if (fill) fill.style.width = `${pct}%`;
+  container.setAttribute("aria-valuenow", String(pct));
 }
 
-let cachedModelStatusText: HTMLElement | null = null;
-
 export function setModelStatusText(text: string) {
-  if (!cachedModelStatusText) cachedModelStatusText = document.getElementById("model-status-text");
-  if (cachedModelStatusText) cachedModelStatusText.textContent = text;
+  const el = document.getElementById("model-status-text");
+  if (el) el.textContent = text;
 }
 
 /** @param fromCache true면 디스크 캐시에서 로드 중 (다운로드 아님) */
@@ -131,20 +81,15 @@ export function setExtractButtonEnabled(enabled: boolean) {
   if (extractButton) extractButton.disabled = !enabled;
 }
 
-/** 진행 메시지: 진행 중인 카드의 배지에 표시 */
+/** 진행 메시지: 진행 중인 카드의 배지에 표시. text/id 없으면 모든 배지를 "진행 중"으로 초기화 */
 export function setGlobalStepMessage(text: string | null, inProgressItemId?: string) {
-  setCardStepMessage(text ? (inProgressItemId ?? null) : null, text);
-}
-
-function setCardStepMessage(itemId: string | null, text: string | null) {
   const historyWrapper = document.getElementById("historyWrapper");
   if (!historyWrapper) return;
-  if (itemId && text) {
-    const card = historyWrapper.querySelector(`[data-id="${CSS.escape(itemId)}"]`);
-    const slot = card?.querySelector<HTMLElement>(".badge-step-text");
-    if (slot) {
-      slot.textContent = text;
-    }
+  if (text && inProgressItemId) {
+    const slot = historyWrapper
+      .querySelector(`[data-id="${CSS.escape(inProgressItemId)}"]`)
+      ?.querySelector<HTMLElement>(".badge-step-text");
+    if (slot) slot.textContent = text;
   } else {
     historyWrapper.querySelectorAll(".badge-step-text").forEach((slot) => {
       (slot as HTMLElement).textContent = "진행 중";
@@ -245,12 +190,6 @@ export function renderHistory(
     fragment.appendChild(itemEl);
   });
   historyWrapper.appendChild(fragment);
-}
-
-/** 추출/요약 진행 중 로딩 인디케이터 표시 토글 */
-export function setExtractLoading(loading: boolean) {
-  const indicator = document.getElementById("loading-indicator");
-  if (indicator) indicator.style.display = loading ? "block" : "none";
 }
 
 export function showToast(message: string, type: "error" | "info" | "success" = "info", durationMs = 3000) {

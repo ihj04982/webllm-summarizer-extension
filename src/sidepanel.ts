@@ -8,7 +8,6 @@ import {
   DEFAULT_MODEL_ID,
 } from "./engine/engineManager";
 import {
-  MAX_HISTORY_ITEMS,
   getLocalHistory,
   refreshLocalHistory,
   addSummaryItem,
@@ -28,7 +27,6 @@ import {
   renderModelStatusText,
   showLoadingState,
   showToast,
-  setExtractLoading,
   updateSummaryCardContent,
   renderProgressBar,
   setGlobalStepMessage,
@@ -104,7 +102,7 @@ function setSummarizing(active: boolean) {
 
 function renderAll() {
   renderHistory(
-    getLocalHistory().slice(0, MAX_HISTORY_ITEMS),
+    getLocalHistory(),
     historyWrapper,
     (card, item) => setupCardEventListeners(card, item, startSummary, handleDeleteSummary, onStopSummary),
     isSummarizing
@@ -287,8 +285,6 @@ function requestExtraction(tabId: number): Promise<ExtractedContent> {
 async function onExtract() {
   if (isSummarizing || !isModelReady) return;
   setExtractButtonEnabled(false);
-  setGlobalStepMessage("페이지 내용 추출 중…");
-  setExtractLoading(true);
 
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -318,7 +314,6 @@ async function onExtract() {
     setSummarizing(false);
   } finally {
     setGlobalStepMessage(null);
-    setExtractLoading(false);
   }
 }
 
